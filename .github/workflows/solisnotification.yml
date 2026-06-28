@@ -6,7 +6,7 @@ on:
     - cron: "30 21 * * *"
 
 jobs:
-  send-solis-report:
+  send-report:
     runs-on: ubuntu-latest
     steps:
       - name: Baixar código do repositório
@@ -20,11 +20,12 @@ jobs:
       - name: Instalar dependências
         run: pip install -r requirements.txt
 
-      - name: Rodar relatório Solis
+      - name: Enviar relatório Solis via WhatsApp
         env:
           SOLIS_API_ID: ${{ secrets.SOLIS_API_ID }}
           SOLIS_API_SECRET: ${{ secrets.SOLIS_API_SECRET }}
           SOLIS_BASE_URL: ${{ secrets.SOLIS_BASE_URL }}
           SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
+          CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
+          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
         run: python send_daily_report.py
-```
