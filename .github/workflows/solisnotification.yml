@@ -1,0 +1,30 @@
+name: SolisNotification
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 21 * * *"
+
+jobs:
+  send-solis-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar código do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Rodar relatório Solis
+        env:
+          SOLIS_API_ID: ${{ secrets.SOLIS_API_ID }}
+          SOLIS_API_SECRET: ${{ secrets.SOLIS_API_SECRET }}
+          SOLIS_BASE_URL: ${{ secrets.SOLIS_BASE_URL }}
+          SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
+        run: python send_daily_report.py
+```
