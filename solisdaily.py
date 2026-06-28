@@ -50,7 +50,7 @@ def build_message(station_data: dict[str, Any]) -> str:
     status_label = STATION_STATUS_LABELS.get(info.get("state"), "Desconhecido")
 
     return (
-        "*Relatório Diário Solis* ☀️\n\n"
+        "* Olá, Marcio! Relatório Diário Da Sua Energia Solar* ☀️\n\n"
         f"Geração hoje: {energy_today} {energy_unit}\n"
         f"Potência atual: {current_power} {power_unit}\n"
         f"Status da usina: {status_label}"
