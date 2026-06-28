@@ -28,4 +28,4 @@ jobs:
           SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
           CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
           CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
-        run: python send_daily_report.py
+        run: python solisdaily.py
