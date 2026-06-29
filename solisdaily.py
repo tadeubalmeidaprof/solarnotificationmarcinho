@@ -1,23 +1,24 @@
 import logging
 import os
 import sys
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
 from solis_client import SolisAPIError, SolisClient, SolisCredentials
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+
 logger = logging.getLogger(__name__)
 
 CALLMEBOT_URL = "https://api.callmebot.com/whatsapp.php"
 REQUEST_TIMEOUT = 15
-
-STATION_STATUS_LABELS = {
-    1: "Online ✅",
-    2: "Offline ⚠️",
-    3: "Em alarme 🚨",
-}
 
 REQUIRED_ENV_VARS = (
     "SOLIS_API_ID",
@@ -35,35 +36,76 @@ class WhatsAppDeliveryError(Exception):
 
 def load_environment() -> dict[str, str]:
     missing = [var for var in REQUIRED_ENV_VARS if not os.environ.get(var)]
+
     if missing:
-        raise EnvironmentError(f"Variáveis de ambiente faltando: {', '.join(missing)}")
-    return {var: os.environ[var] for var in REQUIRED_ENV_VARS}
+        raise EnvironmentError(
+            f"Variáveis de ambiente faltando: {', '.join(missing)}"
+        )
+
+    return {var: os.environ[var].strip() for var in REQUIRED_ENV_VARS}
 
 
-def build_message(station_data: dict[str, Any]) -> str:
-    info = station_data.get("data", {})
+def extract_station_from_list(
+    response: dict[str, Any],
+    station_id: str,
+) -> dict[str, Any]:
+    records = (
+        response
+        .get("data", {})
+        .get("page", {})
+        .get("records", [])
+    )
 
-    energy_today = info.get("eToday", "N/D")
-    energy_unit = info.get("eTodayStr", "kWh")
-    current_power = info.get("pac", "N/D")
-    power_unit = info.get("pacStr", "kW")
-    status_label = STATION_STATUS_LABELS.get(info.get("state"), "Desconhecido")
+    if not records:
+        raise SolisAPIError("Nenhuma usina encontrada na resposta da Solis.")
+
+    for station in records:
+        if str(station.get("id")) == str(station_id):
+            return station
+
+    raise SolisAPIError(
+        f"Usina com ID {station_id} não encontrada na resposta da Solis."
+    )
+
+
+def to_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def build_message(station: dict[str, Any], report_date: str) -> str:
+    energy_today = to_float(station.get("dayEnergy", 0))
+    energy_month = to_float(station.get("monthEnergy", 0))
 
     return (
-        "* Olá, Marcio! Relatório Diário Da Sua Energia Solar* ☀️\n\n"
-        f"Geração hoje: {energy_today} {energy_unit}\n"
-        f"Potência atual: {current_power} {power_unit}\n"
-        f"Status da usina: {status_label}"
+        "☀️ * Olá, Marcio! Aqui está seu Relatório Solar*\n\n"
+        f"Data: {report_date}\n"
+        f"Geração hoje: {energy_today:.2f} kWh\n"
+        f"Geração no mês: {energy_month:.2f} kWh"
     )
 
 
 def send_whatsapp_message(message: str, phone: str, api_key: str) -> str:
-    params = {"phone": phone, "text": message, "apikey": api_key}
+    params = {
+        "phone": phone,
+        "text": message,
+        "apikey": api_key,
+    }
+
     try:
-        response = requests.get(CALLMEBOT_URL, params=params, timeout=REQUEST_TIMEOUT)
+        response = requests.get(
+            CALLMEBOT_URL,
+            params=params,
+            timeout=REQUEST_TIMEOUT,
+        )
         response.raise_for_status()
     except requests.exceptions.RequestException as exc:
-        raise WhatsAppDeliveryError("Falha ao enviar mensagem via CallMeBot") from exc
+        raise WhatsAppDeliveryError(
+            "Falha ao enviar mensagem via CallMeBot"
+        ) from exc
+
     return response.text
 
 
@@ -80,19 +122,35 @@ def main() -> int:
         base_url=env["SOLIS_BASE_URL"],
         station_id=env["SOLIS_STATION_ID"],
     )
+
     client = SolisClient(credentials)
 
     try:
-        station_data = client.get_station_detail()
+        logger.info("Buscando lista de usinas na SolisCloud...")
+        station_list = client.list_stations()
+
+        station = extract_station_from_list(
+            station_list,
+            env["SOLIS_STATION_ID"],
+        )
+
     except SolisAPIError as exc:
-        logger.error(exc)
+        logger.error("Erro na API Solis: %s", exc)
         return 1
 
-    message = build_message(station_data)
+    now = datetime.now(ZoneInfo("America/Bahia"))
+    report_date = now.strftime("%d/%m/%Y às %H:%M")
+
+    message = build_message(station, report_date)
+
     logger.info("Mensagem gerada:\n%s", message)
 
     try:
-        result = send_whatsapp_message(message, env["CALLMEBOT_PHONE"], env["CALLMEBOT_APIKEY"])
+        result = send_whatsapp_message(
+            message=message,
+            phone=env["CALLMEBOT_PHONE"],
+            api_key=env["CALLMEBOT_APIKEY"],
+        )
     except WhatsAppDeliveryError as exc:
         logger.error(exc)
         return 1
