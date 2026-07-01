@@ -26,6 +26,8 @@ jobs:
           SOLIS_API_SECRET: ${{ secrets.SOLIS_API_SECRET }}
           SOLIS_BASE_URL: ${{ secrets.SOLIS_BASE_URL }}
           SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
-          CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
-          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+          GREEN_API_URL: ${{ secrets.GREEN_API_URL }}
+          GREEN_API_ID_INSTANCE: ${{ secrets.GREEN_API_ID_INSTANCE }}
+          GREEN_API_TOKEN_INSTANCE: ${{ secrets.GREEN_API_TOKEN_INSTANCE }}
+          GREEN_API_PHONE: ${{ secrets.GREEN_API_PHONE }}
         run: python solisdaily.py
