@@ -1,4 +1,4 @@
-Fimport logging
+import logging
 import os
 import sys
 from datetime import datetime
@@ -17,7 +17,7 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-CALLMEBOT_URL = "https://api.callmebot.com/whatsapp.php"
+
 REQUEST_TIMEOUT = 15
 
 REQUIRED_ENV_VARS = (
@@ -25,14 +25,11 @@ REQUIRED_ENV_VARS = (
     "SOLIS_API_SECRET",
     "SOLIS_BASE_URL",
     "SOLIS_STATION_ID",
-    "CALLMEBOT_PHONE",
-    "CALLMEBOT_APIKEY",
+    "GREENAPI_PHONE",
+    "GREENAPI_URL",
+    "GREENAPI_INSTANCE_ID",
+    "GREENAPI_TOKEN",
 )
-
-
-class WhatsAppDeliveryError(Exception):
-    pass
-
 
 def load_environment() -> dict[str, str]:
     missing = [var for var in REQUIRED_ENV_VARS if not os.environ.get(var)]
@@ -139,18 +136,17 @@ def main() -> int:
 
     logger.info("Mensagem gerada:\n%s", message)
 
-    try:
-        result = send_whatsapp_message(
-            message=message,
-            phone=env["CALLMEBOT_PHONE"],
-            api_key=env["CALLMEBOT_APIKEY"],
-        )
-    except WhatsAppDeliveryError as exc:
-        logger.error(exc)
-        return 1
-
-    logger.info("Mensagem enviada com sucesso: %s", result)
-    return 0
+  try:
+    result = send_whatsapp_message(
+        message=message,
+        phone=env["GREENAPI_PHONE"],
+        api_url=env["GREENAPI_URL"],
+        id_instance=env["GREENAPI_INSTANCE_ID"],
+        token_instance=env["GREENAPI_TOKEN"],
+    )
+except requests.RequestException as exc:
+    logger.error("Erro ao enviar mensagem: %s", exc)
+    return 1
 
 
 if __name__ == "__main__":
