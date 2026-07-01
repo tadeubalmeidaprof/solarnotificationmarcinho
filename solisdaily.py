@@ -1,4 +1,4 @@
-import logging
+Fimport logging
 import os
 import sys
 from datetime import datetime
@@ -87,24 +87,18 @@ def build_message(station: dict[str, Any], report_date: str) -> str:
     )
 
 
-def send_whatsapp_message(message: str, phone: str, api_key: str) -> str:
-    params = {
-        "phone": phone,
-        "text": message,
-        "apikey": api_key,
+def send_whatsapp_message(message: str, phone: str, api_url: str, id_instance: str, token_instance: str) -> str:
+    chat_id = f"{phone}@c.us"
+
+    url = f"{api_url}/waInstance{id_instance}/SendMessage/{token_instance}"
+
+    payload = {
+        "chatId": chat_id,
+        "message": message,
     }
 
-    try:
-        response = requests.get(
-            CALLMEBOT_URL,
-            params=params,
-            timeout=REQUEST_TIMEOUT,
-        )
-        response.raise_for_status()
-    except requests.exceptions.RequestException as exc:
-        raise WhatsAppDeliveryError(
-            "Falha ao enviar mensagem via CallMeBot"
-        ) from exc
+    response = requests.post(url, json=payload, timeout=30)
+    response.raise_for_status()
 
     return response.text
 
