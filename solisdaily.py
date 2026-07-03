@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from solis_client import SolisAPIError, SolisClient, SolisCredentials
+from solisclient import SolisAPIError, SolisClient, SolisCredentials
 
 logging.basicConfig(
     level=logging.INFO,
