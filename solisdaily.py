@@ -23,10 +23,8 @@ REQUIRED_ENV_VARS = (
     "SOLIS_API_SECRET",
     "SOLIS_BASE_URL",
     "SOLIS_STATION_ID",
-    "GREEN_API_URL",
-    "GREEN_API_ID_INSTANCE",
-    "GREEN_API_TOKEN_INSTANCE",
-    "GREEN_API_PHONE",
+    "CALLMEBOT_APIKEY",
+    "CALLMEBOT_PHONE",
 )
 
 
@@ -137,10 +135,9 @@ def main() -> int:
     try:
         result = send_whatsapp_message(
             message=message,
-            phone=env["GREEN_API_PHONE"],
-            api_url=env["GREEN_API_URL"],
-            id_instance=env["GREEN_API_ID_INSTANCE"],
-            token_instance=env["GREEN_API_TOKEN_INSTANCE"],
+            phone=env["CALLMEBOT_PHONE"],
+            api_key=env["CALLMEBOT_APIKEY"],
+         
         )
     except WhatsAppDeliveryError as exc:
         logger.error("%s", exc)
