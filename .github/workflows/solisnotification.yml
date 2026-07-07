@@ -2,8 +2,7 @@ name: SolisNotification
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "30 21 * * *"
+  
 
 jobs:
   send-report:
