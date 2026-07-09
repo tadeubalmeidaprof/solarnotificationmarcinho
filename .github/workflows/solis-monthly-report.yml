@@ -1,0 +1,46 @@
+name: Solis relatório mensal
+
+on:
+  workflow_dispatch:
+    inputs:
+      report_year_month:
+        description: "Mês do relatório para teste, no formato YYYY-MM. Se vazio, usa o mês anterior."
+        required: false
+        default: ""
+
+jobs:
+  send-monthly-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar código do repositório
+        uses: actions/checkout@v4
+
+      - name: Mostrar horário do runner
+        run: |
+          echo "UTC agora:"
+          date -u
+          echo "Brasil/Bahia agora:"
+          TZ='America/Bahia' date
+          echo "Evento GitHub:"
+          echo "$GITHUB_EVENT_NAME"
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Enviar relatório mensal Solis via WhatsApp
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
+          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+          CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
+          ENERGY_TARIFF: ${{ secrets.ENERGY_TARIFF }}
+          REPORT_YEAR_MONTH: ${{ github.event.inputs.report_year_month }}
+        run: python send_monthly_report.py
