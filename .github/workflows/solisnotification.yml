@@ -2,7 +2,7 @@ name: SolisNotification
 
 on:
   workflow_dispatch:
-  
+   
 
 jobs:
   send-report:
@@ -31,3 +31,14 @@ jobs:
           CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
           CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
         run: python solisdaily.py
+
+      - name: Salvar geração mensal no Supabase
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SOLIS_API_ID: ${{ secrets.SOLIS_API_ID }}
+          SOLIS_API_SECRET: ${{ secrets.SOLIS_API_SECRET }}
+          SOLIS_BASE_URL: ${{ secrets.SOLIS_BASE_URL }}
+          SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
+          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+          CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
+        run: python save_monthly_snapshot.py
