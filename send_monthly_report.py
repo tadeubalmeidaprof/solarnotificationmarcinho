@@ -99,23 +99,19 @@ def build_monthly_message(
     generation_kwh: Decimal,
     average_daily_kwh: Decimal,
     tariff: Decimal,
-    savings_data: dict,
+    savings: Decimal,
 ) -> str:
     return f"""☀️ *Olá, Marcio! Aqui está seu Relatório Solar Mensal*
 
 Resumo de {month_label}:
 
 ⚡ Geração total: {br_number(generation_kwh, 1)} kWh
-⚖️ Energia compensada estimada: {br_number(savings_data["compensated_energy_kwh"], 1)} kWh
-🔋 Créditos estimados: {br_number(savings_data["generated_credits_kwh"], 1)} kWh
 📊 Média diária: {br_number(average_daily_kwh, 1)} kWh/dia
-💰 Economia estimada: {format_brl(savings_data["estimated_savings"])}
+💰 Economia estimada: {format_brl(savings)}
 
-📌 Ligação considerada: monofásica
-📌 Custo mínimo considerado: {br_number(savings_data["minimum_kwh"], 0)} kWh
-📌 Tarifa considerada: {format_brl(tariff)} por kWh.
+Tarifa considerada: {format_brl(tariff)} por kWh.
 
-Valor estimado com base na geração registrada, consumo médio cadastrado e regras de compensação informadas.
+Valor estimado com base na geração registrada no monitoramento solar.
 """
 
 
@@ -141,6 +137,7 @@ def main() -> int:
         final_tariff_kwh=tariff,
         connection_type=CONNECTION_TYPE,
     )
+    savings = savings_data["estimated_savings"]
     average_daily_kwh = generation_kwh / Decimal(days_in_month)
 
     print(
@@ -151,9 +148,7 @@ def main() -> int:
             "generation_kwh": str(generation_kwh),
             "average_consumption_kwh": str(average_consumption_kwh),
             "tariff": str(tariff),
-            "savings": str(savings_data["estimated_savings"]),
-            "compensated_energy_kwh": str(savings_data["compensated_energy_kwh"]),
-            "generated_credits_kwh": str(savings_data["generated_credits_kwh"]),
+            "savings": str(savings),
             "average_daily_kwh": str(average_daily_kwh),
         },
     )
@@ -163,7 +158,7 @@ def main() -> int:
         generation_kwh=generation_kwh,
         average_daily_kwh=average_daily_kwh,
         tariff=tariff,
-        savings_data=savings_data,
+        savings=savings,
     )
 
     print("Mensagem mensal para Marcio:")
