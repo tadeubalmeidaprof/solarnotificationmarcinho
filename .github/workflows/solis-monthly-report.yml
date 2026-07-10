@@ -42,5 +42,6 @@ jobs:
           CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
           CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
           ENERGY_TARIFF: ${{ secrets.ENERGY_TARIFF }}
+          AVERAGE_CONSUMPTION_KWH: ${{ secrets.AVERAGE_CONSUMPTION_KWH }}
           REPORT_YEAR_MONTH: ${{ github.event.inputs.report_year_month }}
         run: python send_monthly_report.py
