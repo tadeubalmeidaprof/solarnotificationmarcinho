@@ -5,10 +5,12 @@ from decimal import Decimal, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 
 from database import fetch_generation_for_month, to_decimal
+from savings_calculator import calculate_savings_without_fio_b
 from solisdaily import send_whatsapp_message
 
 
 REPORT_TIMEZONE = ZoneInfo("America/Bahia")
+CONNECTION_TYPE = "monofasico"
 
 MONTH_NAMES_PT = {
     1: "janeiro",
@@ -80,24 +82,40 @@ def format_brl(value: Decimal) -> str:
     return f"R$ {text}"
 
 
+def get_average_consumption(generation_kwh: Decimal) -> Decimal:
+    configured = os.getenv("AVERAGE_CONSUMPTION_KWH", "").strip()
+
+    if configured:
+        return to_decimal(configured)
+
+    # Fallback seguro para manter o relatório funcionando quando o consumo médio
+    # ainda não foi cadastrado. Considera que toda a geração do mês foi compensável
+    # e soma o mínimo monofásico de 30 kWh.
+    return generation_kwh + Decimal("30")
+
+
 def build_monthly_message(
     month_label: str,
     generation_kwh: Decimal,
     average_daily_kwh: Decimal,
     tariff: Decimal,
-    savings: Decimal,
+    savings_data: dict,
 ) -> str:
     return f"""☀️ *Olá, Marcio! Aqui está seu Relatório Solar Mensal*
 
 Resumo de {month_label}:
 
 ⚡ Geração total: {br_number(generation_kwh, 1)} kWh
+⚖️ Energia compensada estimada: {br_number(savings_data["compensated_energy_kwh"], 1)} kWh
+🔋 Créditos estimados: {br_number(savings_data["generated_credits_kwh"], 1)} kWh
 📊 Média diária: {br_number(average_daily_kwh, 1)} kWh/dia
-💰 Economia estimada: {format_brl(savings)}
+💰 Economia estimada: {format_brl(savings_data["estimated_savings"])}
 
-Tarifa considerada: {format_brl(tariff)} por kWh.
+📌 Ligação considerada: monofásica
+📌 Custo mínimo considerado: {br_number(savings_data["minimum_kwh"], 0)} kWh
+📌 Tarifa considerada: {format_brl(tariff)} por kWh.
 
-Valor estimado com base na geração registrada no monitoramento solar.
+Valor estimado com base na geração registrada, consumo médio cadastrado e regras de compensação informadas.
 """
 
 
@@ -116,7 +134,13 @@ def main() -> int:
 
     found_station_id, generation_kwh = result
     tariff = to_decimal(env("ENERGY_TARIFF", required=True))
-    savings = generation_kwh * tariff
+    average_consumption_kwh = get_average_consumption(generation_kwh)
+    savings_data = calculate_savings_without_fio_b(
+        generation_month_kwh=generation_kwh,
+        average_consumption_month_kwh=average_consumption_kwh,
+        final_tariff_kwh=tariff,
+        connection_type=CONNECTION_TYPE,
+    )
     average_daily_kwh = generation_kwh / Decimal(days_in_month)
 
     print(
@@ -125,8 +149,11 @@ def main() -> int:
             "station_id": found_station_id,
             "year_month": year_month,
             "generation_kwh": str(generation_kwh),
+            "average_consumption_kwh": str(average_consumption_kwh),
             "tariff": str(tariff),
-            "savings": str(savings),
+            "savings": str(savings_data["estimated_savings"]),
+            "compensated_energy_kwh": str(savings_data["compensated_energy_kwh"]),
+            "generated_credits_kwh": str(savings_data["generated_credits_kwh"]),
             "average_daily_kwh": str(average_daily_kwh),
         },
     )
@@ -136,7 +163,7 @@ def main() -> int:
         generation_kwh=generation_kwh,
         average_daily_kwh=average_daily_kwh,
         tariff=tariff,
-        savings=savings,
+        savings_data=savings_data,
     )
 
     print("Mensagem mensal para Marcio:")
