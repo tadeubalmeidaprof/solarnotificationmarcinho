@@ -41,6 +41,7 @@ def save_monthly_generation_snapshot(
     station_id: str,
     report_date: date,
     generation_kwh,
+    provider: str = "",
 ) -> None:
     if not station_id:
         raise ValueError("station_id não pode ser vazio.")
@@ -54,9 +55,10 @@ def save_monthly_generation_snapshot(
             year_month,
             generation_kwh,
             last_report_date,
+            provider,
             updated_at
         )
-        VALUES (%s, %s, %s, %s, NOW())
+        VALUES (%s, %s, %s, %s, %s, NOW())
         ON CONFLICT (station_id, year_month)
         DO UPDATE SET
             generation_kwh = GREATEST(
@@ -67,6 +69,7 @@ def save_monthly_generation_snapshot(
                 monthly_generation.last_report_date,
                 EXCLUDED.last_report_date
             ),
+            provider = COALESCE(NULLIF(EXCLUDED.provider, ''), monthly_generation.provider),
             updated_at = NOW();
     """
 
@@ -79,6 +82,7 @@ def save_monthly_generation_snapshot(
                     year_month,
                     generation,
                     report_date.isoformat(),
+                    provider,
                 ),
             )
 

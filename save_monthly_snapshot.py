@@ -46,6 +46,7 @@ def main() -> int:
         station_id=station_id,
         report_date=today,
         generation_kwh=generation_month_kwh,
+        provider="Solis",
     )
 
     print(
@@ -54,6 +55,7 @@ def main() -> int:
             "station_id": station_id,
             "report_date": today.isoformat(),
             "generation_month_kwh": generation_month_kwh,
+            "provider": "Solis",
         },
     )
 
