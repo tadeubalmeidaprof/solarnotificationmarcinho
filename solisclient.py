@@ -120,3 +120,33 @@ class SolisClient:
                 "pageSize": 10,
             },
         )
+
+    def list_alarms(
+        self,
+        station_id: str | None = None,
+        begin_date: str | None = None,
+        end_date: str | None = None,
+        page_size: int = 100,
+    ) -> dict[str, Any]:
+        target_station_id = str(
+            station_id or self.credentials.station_id or ""
+        ).strip()
+
+        payload: dict[str, Any] = {
+            "pageSize": max(1, min(int(page_size), 100)),
+        }
+
+        if target_station_id:
+            payload["stationId"] = (
+                int(target_station_id)
+                if target_station_id.isdigit()
+                else target_station_id
+            )
+
+        if begin_date:
+            payload["alarmBeginTime"] = begin_date
+
+        if end_date:
+            payload["alarmEndTime"] = end_date
+
+        return self.post("/v1/api/alarmList", payload)
