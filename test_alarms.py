@@ -67,7 +67,7 @@ def sanitize_extended(value):
 
 
 def main() -> int:
-    days = int(os.getenv("ALARM_TEST_DAYS", "90").strip() or "90")
+    days = int(os.getenv("ALARM_TEST_DAYS", "365").strip() or "90")
     if days < 1 or days > 3650:
         raise RuntimeError("ALARM_TEST_DAYS deve estar entre 1 e 3650.")
 
