@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from database import mark_solis_alarm_notified, upsert_solis_alarm_event
 from solisclient import SolisAPIError, SolisClient, SolisCredentials
-from solisdaily import WhatsAppDeliveryError, send_whatsapp_message
+from whatsapp import send_message
 
 
 TIMEZONE = ZoneInfo("America/Bahia")
@@ -295,16 +295,7 @@ def build_alarm_message(alarm: dict) -> str:
 
 
 def notify_alarm(alarm: dict) -> None:
-    result = send_whatsapp_message(
-        message=build_alarm_message(alarm),
-        phone=required_env("CALLMEBOT_PHONE"),
-        api_key=required_env("CALLMEBOT_APIKEY"),
-    )
-
-    if "message queued" not in result.lower():
-        raise WhatsAppDeliveryError(
-            "CallMeBot respondeu sem confirmar o enfileiramento da mensagem."
-        )
+    send_message(build_alarm_message(alarm))
 
 
 def main() -> None:
