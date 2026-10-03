@@ -264,30 +264,30 @@ def build_alarm_message(alarm: dict) -> str:
         "🚨 SOLCARE - ALARME DETECTADO NA USINA SOLAR",
         "",
         f"⚠️ Solis - Código {code}",
-        f"🔎 Nível: {LEVEL_LABELS.get(level, clean_text(alarm.get('alarmLevel')) or '-')}",
-        f"❗ Falha: {message or 'Alarme informado pela SolisCloud'}",
-        f"🕒 Detectado em: {format_alarm_time(alarm.get('alarmBeginTime'))}",
+        f"Nível: {LEVEL_LABELS.get(level, clean_text(alarm.get('alarmLevel')) or '-')}",
+        f"⚠️ Falha: {message or 'Alarme informado pela SolisCloud'}",
+        f"Detectado em: {format_alarm_time(alarm.get('alarmBeginTime'))}",
     ]
 
     if warning_info:
-        lines.append(f"🧩 Subcódigo/dados: {warning_info}")
+        lines.append(f"Subcódigo/dados: {warning_info}")
 
     if advice:
-        lines.extend(["", f"🛠️ Orientação: {advice}"])
+        lines.extend(["", f"Orientação: {advice}"])
 
     if alarm_is_resolved(alarm):
         lines.extend(
             [
                 "",
-                "✅ Situação atual: a SolisCloud já registra recuperação.",
-                f"🕒 Normalização: {format_alarm_time(alarm.get('alarmEndTime'))}",
+                "Situação atual: a SolisCloud já registra recuperação.",
+                f"Normalização: {format_alarm_time(alarm.get('alarmEndTime'))}",
             ]
         )
     elif state is not None:
         lines.extend(
             [
                 "",
-                f"📡 Estado na SolisCloud: {STATE_LABELS.get(state, str(state))}",
+                f"Estado na SolisCloud: {STATE_LABELS.get(state, str(state))}",
             ]
         )
 
