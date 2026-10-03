@@ -119,8 +119,12 @@ def main() -> int:
     today = datetime.now(REPORT_TIMEZONE).date()
     year_month, month_label, days_in_month = get_report_month(today)
 
-    station_id = env("SOLIS_STATION_ID")
-    result = fetch_generation_for_month(year_month=year_month, station_id=station_id or None)
+    station_id = env("SOLIS_STATION_ID", required=True)
+    result = fetch_generation_for_month(
+        year_month=year_month,
+        station_id=station_id,
+        provider="Solis",
+    )
 
     if not result:
         raise RuntimeError(
