@@ -6,7 +6,7 @@ on:
       days:
         description: "Quantidade de dias do histórico a consultar"
         required: false
-        default: "90"
+        default: "365"
   push:
     branches:
       - main
@@ -47,5 +47,5 @@ jobs:
           SOLIS_API_SECRET: ${{ secrets.SOLIS_API_SECRET }}
           SOLIS_BASE_URL: ${{ secrets.SOLIS_BASE_URL }}
           SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
-          ALARM_TEST_DAYS: ${{ github.event.inputs.days || '90' }}
+          ALARM_TEST_DAYS: ${{ github.event.inputs.days || '365' }}
         run: python test_alarms.py
