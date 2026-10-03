@@ -127,6 +127,7 @@ class SolisClient:
         begin_date: str | None = None,
         end_date: str | None = None,
         page_size: int = 100,
+        min_id: int | None = None,
     ) -> dict[str, Any]:
         target_station_id = str(
             station_id or self.credentials.station_id or ""
@@ -148,5 +149,8 @@ class SolisClient:
 
         if end_date:
             payload["alarmEndTime"] = end_date
+
+        if min_id is not None:
+            payload["minId"] = int(min_id)
 
         return self.post("/v1/api/alarmList", payload)
