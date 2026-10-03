@@ -22,6 +22,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Salvar geração mensal no Supabase
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SOLIS_API_ID: ${{ secrets.SOLIS_API_ID }}
+          SOLIS_API_SECRET: ${{ secrets.SOLIS_API_SECRET }}
+          SOLIS_BASE_URL: ${{ secrets.SOLIS_BASE_URL }}
+          SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
+        run: python save_monthly_snapshot.py
+
       - name: Enviar relatório Solis via WhatsApp
         env:
           SOLIS_API_ID: ${{ secrets.SOLIS_API_ID }}
@@ -31,12 +40,3 @@ jobs:
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
           WHAPI_CHAT_ID: ${{ secrets.WHAPI_CHAT_ID }}
         run: python solisdaily.py
-
-      - name: Salvar geração mensal no Supabase
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          SOLIS_API_ID: ${{ secrets.SOLIS_API_ID }}
-          SOLIS_API_SECRET: ${{ secrets.SOLIS_API_SECRET }}
-          SOLIS_BASE_URL: ${{ secrets.SOLIS_BASE_URL }}
-          SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
-        run: python save_monthly_snapshot.py
