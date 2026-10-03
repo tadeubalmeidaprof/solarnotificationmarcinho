@@ -42,7 +42,6 @@ jobs:
           SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
           WHAPI_CHAT_ID: ${{ secrets.WHAPI_CHAT_ID }}
-          WHAPI_API_URL: ${{ secrets.WHAPI_API_URL }}
           SOLIS_ALARM_LOOKBACK_DAYS: ${{ secrets.SOLIS_ALARM_LOOKBACK_DAYS }}
           SOLIS_ALARM_NOTIFY_MAX_AGE_MINUTES: ${{ secrets.SOLIS_ALARM_NOTIFY_MAX_AGE_MINUTES }}
         run: python solis_alarm_monitor.py
