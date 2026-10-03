@@ -69,11 +69,12 @@ def get_record_id(record: dict) -> int | None:
     return None
 
 
-def fetch_recent_alarms(
+def fetch_alarm_pages(
     client: SolisClient,
     station_id: str,
-    begin_date: str,
-    end_date: str,
+    begin_date: str | None = None,
+    end_date: str | None = None,
+    state: int | None = None,
     page_size: int = 100,
     max_pages: int = 20,
 ) -> list[dict]:
@@ -87,6 +88,7 @@ def fetch_recent_alarms(
             end_date=end_date,
             page_size=page_size,
             min_id=min_id,
+            state=state,
         )
         records = get_records(response)
         alarms.extend(records)
@@ -112,6 +114,49 @@ def fetch_recent_alarms(
         )
 
     return alarms
+
+
+def alarm_identity(alarm: dict) -> tuple:
+    record_id = get_record_id(alarm)
+    if record_id is not None:
+        return ("id", record_id)
+
+    return (
+        "event",
+        clean_text(alarm.get("stationId")),
+        clean_text(alarm.get("alarmDeviceSn")),
+        clean_text(alarm.get("alarmCode")),
+        clean_text(alarm.get("alarmBeginTime")),
+    )
+
+
+def fetch_monitor_alarms(
+    client: SolisClient,
+    station_id: str,
+    begin_date: str,
+    end_date: str,
+) -> list[dict]:
+    candidates = fetch_alarm_pages(
+        client=client,
+        station_id=station_id,
+        begin_date=begin_date,
+        end_date=end_date,
+    )
+
+    for state in (0, 1):
+        candidates.extend(
+            fetch_alarm_pages(
+                client=client,
+                station_id=station_id,
+                state=state,
+            )
+        )
+
+    unique = {}
+    for alarm in candidates:
+        unique[alarm_identity(alarm)] = alarm
+
+    return list(unique.values())
 
 
 def parse_alarm_datetime(value) -> datetime | None:
@@ -264,10 +309,10 @@ def notify_alarm(alarm: dict) -> None:
 
 def main() -> None:
     station_id = required_env("SOLIS_STATION_ID")
-    lookback_days = int_env("SOLIS_ALARM_LOOKBACK_DAYS", 30)
+    lookback_days = int_env("SOLIS_ALARM_LOOKBACK_DAYS", 2)
 
-    if lookback_days < 1 or lookback_days > 365:
-        raise RuntimeError("SOLIS_ALARM_LOOKBACK_DAYS deve estar entre 1 e 365.")
+    if lookback_days < 1 or lookback_days > 30:
+        raise RuntimeError("SOLIS_ALARM_LOOKBACK_DAYS deve estar entre 1 e 30.")
 
     today = datetime.now(TIMEZONE).date()
     begin_date = today - timedelta(days=lookback_days)
@@ -281,7 +326,7 @@ def main() -> None:
     client = SolisClient(credentials)
 
     try:
-        alarms = fetch_recent_alarms(
+        alarms = fetch_monitor_alarms(
             client=client,
             station_id=station_id,
             begin_date=begin_date.isoformat(),
@@ -305,11 +350,14 @@ def main() -> None:
         alarm_begin_time = clean_text(alarm.get("alarmBeginTime"))
 
         if not alarm_begin_time:
-            print(
-                "Ignorando alarme sem horário de início:",
-                {"alarm_code": alarm_code},
-            )
-            continue
+            record_id = get_record_id(alarm)
+            if record_id is None:
+                print(
+                    "Ignorando alarme sem horário de início e sem identificador:",
+                    {"alarm_code": alarm_code},
+                )
+                continue
+            alarm_begin_time = f"event-id:{record_id}"
 
         state = as_int(alarm.get("state"))
         status = "resolved" if alarm_is_resolved(alarm) else "active"
