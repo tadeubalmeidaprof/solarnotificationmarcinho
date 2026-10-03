@@ -91,10 +91,22 @@ def save_monthly_generation_snapshot(
 def fetch_generation_for_month(
     year_month: str,
     station_id: str | None = None,
+    provider: str | None = None,
 ) -> tuple[str, Decimal] | None:
     station_id = (station_id or "").strip()
+    provider = (provider or "").strip()
 
-    if station_id:
+    if station_id and provider:
+        query = """
+            SELECT station_id, generation_kwh
+            FROM monthly_generation
+            WHERE station_id = %s
+              AND year_month = %s
+              AND provider = %s
+            LIMIT 1;
+        """
+        params = (station_id, year_month, provider)
+    elif station_id:
         query = """
             SELECT station_id, generation_kwh
             FROM monthly_generation
@@ -103,6 +115,16 @@ def fetch_generation_for_month(
             LIMIT 1;
         """
         params = (station_id, year_month)
+    elif provider:
+        query = """
+            SELECT station_id, generation_kwh
+            FROM monthly_generation
+            WHERE year_month = %s
+              AND provider = %s
+            ORDER BY updated_at DESC
+            LIMIT 1;
+        """
+        params = (year_month, provider)
     else:
         query = """
             SELECT station_id, generation_kwh
