@@ -30,7 +30,6 @@ jobs:
           SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
           WHAPI_CHAT_ID: ${{ secrets.WHAPI_CHAT_ID }}
-          WHAPI_API_URL: ${{ secrets.WHAPI_API_URL }}
         run: python solisdaily.py
 
       - name: Salvar geração mensal no Supabase
