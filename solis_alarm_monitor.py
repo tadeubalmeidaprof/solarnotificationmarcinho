@@ -264,10 +264,10 @@ def notify_alarm(alarm: dict) -> None:
 
 def main() -> None:
     station_id = required_env("SOLIS_STATION_ID")
-    lookback_days = int_env("SOLIS_ALARM_LOOKBACK_DAYS", 2)
+    lookback_days = int_env("SOLIS_ALARM_LOOKBACK_DAYS", 30)
 
-    if lookback_days < 1 or lookback_days > 30:
-        raise RuntimeError("SOLIS_ALARM_LOOKBACK_DAYS deve estar entre 1 e 30.")
+    if lookback_days < 1 or lookback_days > 365:
+        raise RuntimeError("SOLIS_ALARM_LOOKBACK_DAYS deve estar entre 1 e 365.")
 
     today = datetime.now(TIMEZONE).date()
     begin_date = today - timedelta(days=lookback_days)
