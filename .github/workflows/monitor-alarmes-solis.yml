@@ -1,0 +1,47 @@
+name: Monitor de alarmes Solis
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monitor-alarmes-solis
+  cancel-in-progress: true
+
+jobs:
+  monitorar-alarmes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Baixar código do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validar sintaxe
+        run: python -m compileall -q database.py solisclient.py solis_alarm_monitor.py
+
+      - name: Monitorar alarmes Solis
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SOLIS_API_ID: ${{ secrets.SOLIS_API_ID }}
+          SOLIS_API_SECRET: ${{ secrets.SOLIS_API_SECRET }}
+          SOLIS_BASE_URL: ${{ secrets.SOLIS_BASE_URL }}
+          SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
+          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+          CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
+          SOLIS_ALARM_LOOKBACK_DAYS: ${{ secrets.SOLIS_ALARM_LOOKBACK_DAYS }}
+          SOLIS_ALARM_NOTIFY_MAX_AGE_MINUTES: ${{ secrets.SOLIS_ALARM_NOTIFY_MAX_AGE_MINUTES }}
+        run: python solis_alarm_monitor.py

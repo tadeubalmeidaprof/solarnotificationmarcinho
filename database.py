@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import date
 from decimal import Decimal
@@ -121,3 +122,138 @@ def fetch_generation_for_month(
         return None
 
     return str(row[0]), to_decimal(row[1])
+
+
+def upsert_solis_alarm_event(
+    station_id: str,
+    device_sn: str,
+    alarm_code: str,
+    alarm_level: int | None,
+    alarm_message: str,
+    advice: str,
+    alarm_begin_time: str,
+    alarm_end_time: str,
+    state: int | None,
+    warning_info_data,
+    raw_payload: dict,
+    status: str,
+) -> tuple[int, bool, object]:
+    if not station_id:
+        raise ValueError("station_id não pode ser vazio.")
+
+    if not alarm_begin_time:
+        raise ValueError("alarm_begin_time não pode ser vazio.")
+
+    insert_query = """
+        INSERT INTO solis_alarm_events (
+            station_id,
+            device_sn,
+            alarm_code,
+            alarm_level,
+            alarm_message,
+            advice,
+            alarm_begin_time,
+            alarm_end_time,
+            state,
+            warning_info_data,
+            raw_payload,
+            status,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            %s, %s, %s, %s, %s, %s, %s, NULLIF(%s, ''), %s,
+            %s::jsonb, %s::jsonb, %s, NOW(), NOW()
+        )
+        ON CONFLICT (
+            station_id,
+            device_sn,
+            alarm_code,
+            alarm_begin_time
+        )
+        DO NOTHING
+        RETURNING id, notified_at;
+    """
+
+    update_query = """
+        UPDATE solis_alarm_events
+        SET
+            alarm_level = COALESCE(%s, alarm_level),
+            alarm_message = COALESCE(NULLIF(%s, ''), alarm_message),
+            advice = COALESCE(NULLIF(%s, ''), advice),
+            alarm_end_time = COALESCE(NULLIF(%s, ''), alarm_end_time),
+            state = COALESCE(%s, state),
+            warning_info_data = %s::jsonb,
+            raw_payload = %s::jsonb,
+            status = %s,
+            updated_at = NOW()
+        WHERE station_id = %s
+          AND device_sn = %s
+          AND alarm_code = %s
+          AND alarm_begin_time = %s
+        RETURNING id, notified_at;
+    """
+
+    warning_json = json.dumps(warning_info_data, ensure_ascii=False)
+    raw_json = json.dumps(raw_payload, ensure_ascii=False)
+
+    with connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                insert_query,
+                (
+                    str(station_id),
+                    str(device_sn or ""),
+                    str(alarm_code or "unknown"),
+                    alarm_level,
+                    alarm_message,
+                    advice,
+                    alarm_begin_time,
+                    alarm_end_time,
+                    state,
+                    warning_json,
+                    raw_json,
+                    status,
+                ),
+            )
+            row = cursor.fetchone()
+
+            if row:
+                return int(row[0]), True, row[1]
+
+            cursor.execute(
+                update_query,
+                (
+                    alarm_level,
+                    alarm_message,
+                    advice,
+                    alarm_end_time,
+                    state,
+                    warning_json,
+                    raw_json,
+                    status,
+                    str(station_id),
+                    str(device_sn or ""),
+                    str(alarm_code or "unknown"),
+                    alarm_begin_time,
+                ),
+            )
+            row = cursor.fetchone()
+
+    if not row:
+        raise RuntimeError("Não foi possível recuperar o alarme Solis após o upsert.")
+
+    return int(row[0]), False, row[1]
+
+
+def mark_solis_alarm_notified(event_id: int) -> None:
+    query = """
+        UPDATE solis_alarm_events
+        SET notified_at = COALESCE(notified_at, NOW()),
+            updated_at = NOW()
+        WHERE id = %s;
+    """
+
+    with connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query, (event_id,))
