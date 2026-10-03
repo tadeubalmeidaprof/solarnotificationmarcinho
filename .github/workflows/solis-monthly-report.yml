@@ -41,7 +41,6 @@ jobs:
           SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
           WHAPI_CHAT_ID: ${{ secrets.WHAPI_CHAT_ID }}
-          WHAPI_API_URL: ${{ secrets.WHAPI_API_URL }}
           ENERGY_TARIFF: ${{ secrets.ENERGY_TARIFF }}
           AVERAGE_CONSUMPTION_KWH: ${{ secrets.AVERAGE_CONSUMPTION_KWH }}
           REPORT_YEAR_MONTH: ${{ github.event.inputs.report_year_month }}
