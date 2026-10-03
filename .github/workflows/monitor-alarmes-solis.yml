@@ -40,8 +40,8 @@ jobs:
           SOLIS_API_SECRET: ${{ secrets.SOLIS_API_SECRET }}
           SOLIS_BASE_URL: ${{ secrets.SOLIS_BASE_URL }}
           SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
-          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
-          CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
+          WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
+          WHAPI_CHAT_ID: ${{ secrets.WHAPI_CHAT_ID }}
           SOLIS_ALARM_LOOKBACK_DAYS: ${{ secrets.SOLIS_ALARM_LOOKBACK_DAYS }}
           SOLIS_ALARM_NOTIFY_MAX_AGE_MINUTES: ${{ secrets.SOLIS_ALARM_NOTIFY_MAX_AGE_MINUTES }}
         run: python solis_alarm_monitor.py

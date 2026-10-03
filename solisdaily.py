@@ -3,12 +3,10 @@ import os
 import sys
 from datetime import datetime
 from typing import Any
-from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-import requests
-
 from solisclient import SolisAPIError, SolisClient, SolisCredentials
+from whatsapp import WhatsAppDeliveryError, send_message
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,7 +14,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-REQUEST_TIMEOUT = 30
 REPORT_TIMEZONE = ZoneInfo("America/Bahia")
 
 REQUIRED_ENV_VARS = (
@@ -24,13 +21,7 @@ REQUIRED_ENV_VARS = (
     "SOLIS_API_SECRET",
     "SOLIS_BASE_URL",
     "SOLIS_STATION_ID",
-    "CALLMEBOT_APIKEY",
-    "CALLMEBOT_PHONE",
 )
-
-
-class WhatsAppDeliveryError(Exception):
-    pass
 
 
 def load_environment() -> dict[str, str]:
@@ -84,29 +75,6 @@ def build_message(station: dict[str, Any], report_date: str) -> str:
     )
 
 
-def send_whatsapp_message(
-    message: str,
-    phone: str,
-    api_key: str,
-) -> str:
-
-    url = (
-        "https://api.callmebot.com/whatsapp.php"
-        f"?phone={phone}"
-        f"&text={quote(message)}"
-        f"&apikey={api_key}"
-    )
-
-    try:
-        response = requests.get(url, timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as exc:
-        raise WhatsAppDeliveryError(
-            "Falha ao enviar mensagem via CallMeBot"
-        ) from exc
-
-    return response.text
-
 
 def main() -> int:
     try:
@@ -145,17 +113,13 @@ def main() -> int:
     logger.info("Mensagem gerada:\n%s", message)
 
     try:
-        result = send_whatsapp_message(
-            message=message,
-            phone=env["CALLMEBOT_PHONE"],
-            api_key=env["CALLMEBOT_APIKEY"],
-        )
+        result = send_message(message)
 
     except WhatsAppDeliveryError as exc:
         logger.error("%s", exc)
         return 1
 
-    logger.info("Mensagem enviada com sucesso: %s", result)
+    logger.info("Mensagem enviada com sucesso pela Whapi.")
     return 0
 
 

@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from database import fetch_generation_for_month, to_decimal
 from savings_calculator import calculate_savings_without_fio_b
-from solisdaily import send_whatsapp_message
+from whatsapp import send_message
 
 
 REPORT_TIMEZONE = ZoneInfo("America/Bahia")
@@ -164,13 +164,9 @@ def main() -> int:
     print("Mensagem mensal para Marcio:")
     print(message)
 
-    result = send_whatsapp_message(
-        message=message,
-        phone=env("CALLMEBOT_PHONE", required=True),
-        api_key=env("CALLMEBOT_APIKEY", required=True),
-    )
+    send_message(message)
 
-    print("Relatório mensal enviado com sucesso:", result)
+    print("Relatório mensal enviado com sucesso pela Whapi.")
     return 0
 
 

@@ -39,8 +39,8 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
-          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
-          CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
+          WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
+          WHAPI_CHAT_ID: ${{ secrets.WHAPI_CHAT_ID }}
           ENERGY_TARIFF: ${{ secrets.ENERGY_TARIFF }}
           AVERAGE_CONSUMPTION_KWH: ${{ secrets.AVERAGE_CONSUMPTION_KWH }}
           REPORT_YEAR_MONTH: ${{ github.event.inputs.report_year_month }}
