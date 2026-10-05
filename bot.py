@@ -16,6 +16,10 @@ Digite o número da opção desejada."""
 def normalize_text(value: str) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = "".join(
+        ch if ch.isalnum() or ch.isspace() else " "
+        for ch in text
+    )
     return " ".join(text.lower().strip().split())
 
 
