@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: solcare-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn webhook:app
+    healthCheckPath: /health
+    envVars:
+      - key: AUTHORIZED_CHAT_ID
+        sync: false
+      - key: WHAPI_TOKEN
+        sync: false
+      - key: SOLIS_API_ID
+        sync: false
+      - key: SOLIS_API_SECRET
+        sync: false
+      - key: SOLIS_BASE_URL
+        sync: false
+      - key: SOLIS_STATION_ID
+        sync: false
