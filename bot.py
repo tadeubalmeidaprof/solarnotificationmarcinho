@@ -3,14 +3,35 @@ import unicodedata
 from solar_queries import get_generation_summary
 
 
-MENU_MESSAGE = """Olá! Sou o SolCare, seu assistente de energia solar.
+TODAY_BUTTON_ID = "generation_today"
+MONTH_BUTTON_ID = "generation_month"
 
-Escolha uma opção:
+MENU_BODY = """Olá! 👋 Bem-vindo ao *SolCare*.
+Estou aqui para ajudar você a acompanhar sua usina solar de forma rápida e simples.
 
-1 - Geração de hoje
-2 - Geração deste mês
+Selecione uma opção:"""
 
-Digite o número da opção desejada."""
+MENU_FOOTER = "Digite menu a qualquer momento para voltar às opções."
+
+MENU_BUTTONS = [
+    {
+        "id": TODAY_BUTTON_ID,
+        "title": "☀️ Geração de hoje",
+    },
+    {
+        "id": MONTH_BUTTON_ID,
+        "title": "📊 Geração do mês",
+    },
+]
+
+MENU_MESSAGE = f"""{MENU_BODY}
+
+1 - ☀️ Geração de hoje
+2 - 📊 Geração do mês
+
+{MENU_FOOTER}"""
+
+MENU_TRIGGERS = {"oi", "ola", "menu", "ajuda", "inicio"}
 
 
 def normalize_text(value: str) -> str:
@@ -23,13 +44,18 @@ def normalize_text(value: str) -> str:
     return " ".join(text.lower().strip().split())
 
 
+def is_menu_request(message: str) -> bool:
+    return normalize_text(message) in MENU_TRIGGERS
+
+
 def build_reply(message: str) -> str:
+    raw_value = str(message or "").strip().lower()
     text = normalize_text(message)
 
-    if text in {"oi", "ola", "olá", "menu", "ajuda", "inicio", "início"}:
+    if is_menu_request(message):
         return MENU_MESSAGE
 
-    if text == "1":
+    if raw_value == TODAY_BUTTON_ID or text == "1":
         summary = get_generation_summary()
         return (
             "Sua usina gerou "
@@ -37,7 +63,7 @@ def build_reply(message: str) -> str:
             "Digite *menu* para ver as opções novamente."
         )
 
-    if text == "2":
+    if raw_value == MONTH_BUTTON_ID or text == "2":
         summary = get_generation_summary()
         return (
             "Sua usina gerou "
