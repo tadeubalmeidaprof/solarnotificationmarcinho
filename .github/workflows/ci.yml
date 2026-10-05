@@ -35,13 +35,16 @@ jobs:
       - name: Import smoke test
         run: |
           python - <<'PY'
+          import bot
           import database
           import save_monthly_snapshot
           import savings_calculator
           import send_monthly_report
+          import solar_queries
           import solis_alarm_monitor
           import solisclient
           import solisdaily
+          import webhook
           import whatsapp
           PY
 
