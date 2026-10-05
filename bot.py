@@ -29,9 +29,7 @@ def build_reply(message: str) -> str:
         summary = get_generation_summary()
         return (
             "Sua usina gerou "
-            f"*{summary['today_kwh']} kWh hoje*.
-
-"
+            f"*{summary['today_kwh']} kWh hoje*.\n\n"
             "Digite *menu* para ver as opções novamente."
         )
 
@@ -39,15 +37,11 @@ def build_reply(message: str) -> str:
         summary = get_generation_summary()
         return (
             "Sua usina gerou "
-            f"*{summary['month_kwh']} kWh neste mês*.
-
-"
+            f"*{summary['month_kwh']} kWh neste mês*.\n\n"
             "Digite *menu* para ver as opções novamente."
         )
 
     return (
-        "Não entendi sua mensagem.
-
-"
+        "Não entendi sua mensagem.\n\n"
         "Digite *menu* para ver as opções disponíveis."
     )
