@@ -1,5 +1,6 @@
 import unicodedata
 
+from ai.assistant import ask_solcare_ai
 from solar_queries import get_generation_summary
 
 
@@ -31,12 +32,22 @@ MENU_MESSAGE = f"""{MENU_BODY}
 
 {MENU_FOOTER}"""
 
+UNKNOWN_MESSAGE = (
+    "Não entendi sua mensagem.\n\n"
+    "Digite *menu* para ver as opções disponíveis."
+)
+
 MENU_TRIGGERS = {"oi", "ola", "menu", "ajuda", "inicio"}
+TODAY_ALIASES = {"1", "geracao de hoje", "ver geracao de hoje"}
+MONTH_ALIASES = {"2", "geracao do mes", "ver geracao do mes"}
 
 
 def normalize_text(value: str) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
-    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = "".join(
+        ch for ch in text
+        if not unicodedata.combining(ch)
+    )
     text = "".join(
         ch if ch.isalnum() or ch.isspace() else " "
         for ch in text
@@ -48,14 +59,17 @@ def is_menu_request(message: str) -> bool:
     return normalize_text(message) in MENU_TRIGGERS
 
 
-def build_reply(message: str) -> str:
+def build_reply(message: str, chat_id: str = "") -> str:
     raw_value = str(message or "").strip().lower()
-    text = normalize_text(message)
+    normalized = normalize_text(message)
 
     if is_menu_request(message):
         return MENU_MESSAGE
 
-    if raw_value == TODAY_BUTTON_ID or text == "1":
+    if (
+        raw_value == TODAY_BUTTON_ID
+        or normalized in TODAY_ALIASES
+    ):
         summary = get_generation_summary()
         return (
             "Sua usina gerou "
@@ -63,7 +77,10 @@ def build_reply(message: str) -> str:
             "Digite *menu* para ver as opções novamente."
         )
 
-    if raw_value == MONTH_BUTTON_ID or text == "2":
+    if (
+        raw_value == MONTH_BUTTON_ID
+        or normalized in MONTH_ALIASES
+    ):
         summary = get_generation_summary()
         return (
             "Sua usina gerou "
@@ -71,7 +88,8 @@ def build_reply(message: str) -> str:
             "Digite *menu* para ver as opções novamente."
         )
 
-    return (
-        "Não entendi sua mensagem.\n\n"
-        "Digite *menu* para ver as opções disponíveis."
+    ai_reply = ask_solcare_ai(
+        message,
+        chat_id=chat_id,
     )
+    return ai_reply or UNKNOWN_MESSAGE
