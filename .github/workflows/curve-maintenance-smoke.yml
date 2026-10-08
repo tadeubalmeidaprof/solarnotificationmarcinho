@@ -1,0 +1,76 @@
+name: Smoke curva e manutenção
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/curve-maintenance-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - run: pip install -r requirements.txt
+
+      - name: Validar curva real e leitura do histórico
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SOLIS_API_ID: ${{ secrets.SOLIS_API_ID }}
+          SOLIS_API_SECRET: ${{ secrets.SOLIS_API_SECRET }}
+          SOLIS_BASE_URL: ${{ secrets.SOLIS_BASE_URL }}
+          SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
+          STATION_LATITUDE: ${{ secrets.STATION_LATITUDE }}
+          STATION_LONGITUDE: ${{ secrets.STATION_LONGITUDE }}
+          WEATHERAPI_KEY: ${{ secrets.WEATHERAPI_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
+
+          from solar_queries import (
+              get_curve_anomaly_analysis,
+              get_real_maintenance_history,
+          )
+
+          target = (
+              datetime.now(ZoneInfo("America/Bahia")).date()
+              - timedelta(days=1)
+          ).isoformat()
+
+          curve = get_curve_anomaly_analysis(target)
+          analysis = curve.get("analysis") or {}
+          history = get_real_maintenance_history(limit=1)
+
+          safe = {
+              "date": target,
+              "curve_available": analysis.get("available"),
+              "curve_status": analysis.get("status"),
+              "curve_confidence": analysis.get("confidence"),
+              "baseline_days_used": analysis.get("baseline_days_used"),
+              "anomaly_count": len(analysis.get("anomalies") or []),
+              "maintenance_history_read_ok": isinstance(
+                  history.get("events"), list
+              ),
+              "maintenance_history_count": history.get("count"),
+          }
+          print(json.dumps(safe, ensure_ascii=False, indent=2))
+
+          if not safe["curve_available"]:
+              raise SystemExit("Falha: curva real indisponível no smoke test.")
+          if not safe["maintenance_history_read_ok"]:
+              raise SystemExit("Falha: histórico de manutenção não pôde ser lido.")
+          PY
