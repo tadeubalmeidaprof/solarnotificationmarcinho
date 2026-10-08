@@ -3,6 +3,7 @@ from unittest.mock import Mock, patch
 
 from whatsapp import (
     WhatsAppDeliveryError,
+    check_whapi_connection,
     send_interactive_message,
     send_message,
 )
@@ -128,6 +129,36 @@ class SendMessageTests(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):
             with self.assertRaises(WhatsAppDeliveryError):
                 send_message("Teste")
+
+    @patch("whatsapp.requests.post")
+    @patch("whatsapp.requests.head")
+    @patch("whatsapp.requests.get")
+    def test_health_check_does_not_send_message(
+        self,
+        get,
+        head,
+        post,
+    ):
+        health = Mock()
+        health.status_code = 200
+        health.ok = True
+        get.return_value = health
+
+        contact = Mock()
+        contact.status_code = 200
+        head.return_value = contact
+
+        result = check_whapi_connection(
+            token="token-test",
+            chat_id="5511999999999@s.whatsapp.net",
+        )
+
+        self.assertTrue(result["api_reachable"])
+        self.assertTrue(result["authenticated"])
+        self.assertTrue(result["channel_ok"])
+        self.assertTrue(result["chat_exists"])
+        self.assertFalse(result["message_sent"])
+        post.assert_not_called()
 
 
 if __name__ == "__main__":

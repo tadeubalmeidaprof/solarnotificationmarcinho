@@ -194,3 +194,93 @@ def send_interactive_message(
         token=resolved_token,
         api_url=resolved_api_url,
     )
+
+
+def check_whapi_connection(
+    *,
+    token: str | None = None,
+    chat_id: str | None = None,
+    api_url: str | None = None,
+) -> dict:
+    """
+    Valida a conexão com a Whapi sem enviar nenhuma mensagem.
+
+    Faz GET /health para validar token/canal e, quando WHAPI_CHAT_ID estiver
+    configurado, HEAD /contacts/{ContactID} para verificar a existência do
+    contato. Nenhum conteúdo é enviado ao destinatário.
+    """
+    resolved_token = _required(token, "WHAPI_TOKEN")
+    resolved_api_url = (
+        api_url
+        or os.getenv("WHAPI_API_URL", "")
+        or DEFAULT_WHAPI_API_URL
+    ).strip().rstrip("/")
+
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {resolved_token}",
+    }
+
+    result = {
+        "api_reachable": False,
+        "authenticated": False,
+        "channel_ok": False,
+        "health_http_status": None,
+        "chat_configured": False,
+        "chat_exists": None,
+        "chat_check_http_status": None,
+        "message_sent": False,
+    }
+
+    try:
+        response = requests.get(
+            f"{resolved_api_url}/health",
+            headers=headers,
+            timeout=REQUEST_TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        raise WhatsAppDeliveryError(
+            "Não foi possível alcançar a Whapi."
+        ) from exc
+
+    result["api_reachable"] = True
+    result["health_http_status"] = response.status_code
+
+    if response.status_code in {401, 403}:
+        return result
+
+    if not response.ok:
+        return result
+
+    result["authenticated"] = True
+    result["channel_ok"] = True
+
+    resolved_chat_id = (
+        chat_id
+        or os.getenv("WHAPI_CHAT_ID", "")
+    ).strip()
+
+    if not resolved_chat_id:
+        return result
+
+    result["chat_configured"] = True
+
+    try:
+        contact_response = requests.head(
+            f"{resolved_api_url}/contacts/{resolved_chat_id}",
+            headers=headers,
+            timeout=REQUEST_TIMEOUT,
+        )
+    except requests.RequestException:
+        return result
+
+    result["chat_check_http_status"] = (
+        contact_response.status_code
+    )
+
+    if contact_response.status_code in {200, 204}:
+        result["chat_exists"] = True
+    elif contact_response.status_code == 404:
+        result["chat_exists"] = False
+
+    return result
