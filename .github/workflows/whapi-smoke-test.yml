@@ -1,0 +1,72 @@
+name: Teste Whapi sem envio
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/whapi-smoke-test.yml"
+      - "whatsapp.py"
+
+permissions:
+  contents: read
+
+jobs:
+  testar-whapi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Testar canal e contato sem enviar mensagem
+        env:
+          WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
+          WHAPI_CHAT_ID: ${{ secrets.WHAPI_CHAT_ID }}
+          WHAPI_API_URL: ${{ secrets.WHAPI_API_URL }}
+        run: |
+          python - <<'PY'
+          import json
+          from whatsapp import check_whapi_connection
+
+          result = check_whapi_connection()
+
+          safe = {
+              "api_reachable": result.get("api_reachable"),
+              "authenticated": result.get("authenticated"),
+              "channel_ok": result.get("channel_ok"),
+              "health_http_status": result.get("health_http_status"),
+              "chat_configured": result.get("chat_configured"),
+              "chat_exists": result.get("chat_exists"),
+              "chat_check_http_status": result.get("chat_check_http_status"),
+              "message_sent": result.get("message_sent"),
+          }
+
+          print("Resultado sanitizado:")
+          print(json.dumps(safe, indent=2))
+
+          if not safe["api_reachable"]:
+              raise SystemExit("Falha: API Whapi inacessível.")
+          if not safe["authenticated"]:
+              raise SystemExit("Falha: WHAPI_TOKEN não autenticou.")
+          if not safe["channel_ok"]:
+              raise SystemExit("Falha: canal Whapi indisponível.")
+          if not safe["chat_configured"]:
+              raise SystemExit("Falha: WHAPI_CHAT_ID não configurado.")
+          if safe["chat_exists"] is False:
+              raise SystemExit("Falha: WHAPI_CHAT_ID não corresponde a contato existente.")
+          if safe["message_sent"]:
+              raise SystemExit("Falha de segurança: o teste não deve enviar mensagem.")
+
+          print("Whapi pronta para uso. Nenhuma mensagem foi enviada.")
+          PY
