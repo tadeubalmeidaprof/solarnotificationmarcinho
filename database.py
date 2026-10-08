@@ -1106,3 +1106,137 @@ def fetch_solis_alarm_by_code(
 
     return dict(row) if row else None
 
+
+
+# ---------------------------------------------------------------------------
+# Histórico real de manutenção
+# ---------------------------------------------------------------------------
+
+MAINTENANCE_EVENT_TYPES = {
+    "cleaning",
+    "inspection",
+    "preventive",
+    "corrective",
+    "repair",
+    "replacement",
+    "electrical",
+    "inverter",
+    "panel",
+    "other",
+}
+
+
+def save_maintenance_history_event(
+    provider: str,
+    station_id: str,
+    event_date: date,
+    event_type: str,
+    description: str,
+    performed_by: str = "",
+    notes: str = "",
+    source: str = "whatsapp",
+) -> dict[str, Any]:
+    normalized_type = str(event_type or "").strip().lower()
+    if normalized_type not in MAINTENANCE_EVENT_TYPES:
+        raise ValueError("Tipo de manutenção inválido.")
+
+    description = str(description or "").strip()
+    if not description:
+        raise ValueError("Descrição da manutenção não pode ser vazia.")
+
+    if len(description) > 1200:
+        raise ValueError("Descrição da manutenção é muito longa.")
+
+    performed_by = str(performed_by or "").strip()
+    notes = str(notes or "").strip()
+
+    query = """
+        INSERT INTO maintenance_history (
+            provider,
+            station_id,
+            event_date,
+            event_type,
+            description,
+            performed_by,
+            notes,
+            source
+        )
+        VALUES (%s, %s, %s, %s, %s, NULLIF(%s, ''), NULLIF(%s, ''), %s)
+        RETURNING
+            id,
+            event_date,
+            event_type,
+            description,
+            performed_by,
+            notes,
+            source,
+            created_at;
+    """
+
+    with connect() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                query,
+                (
+                    str(provider),
+                    str(station_id),
+                    event_date.isoformat(),
+                    normalized_type,
+                    description,
+                    performed_by,
+                    notes,
+                    str(source or "whatsapp"),
+                ),
+            )
+            row = cursor.fetchone()
+
+    return dict(row)
+
+
+def fetch_maintenance_history(
+    provider: str,
+    station_id: str,
+    limit: int = 10,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(int(limit), 30))
+
+    conditions = [
+        "provider = %s",
+        "station_id = %s",
+    ]
+    params: list[Any] = [str(provider), str(station_id)]
+
+    if start_date is not None:
+        conditions.append("event_date >= %s")
+        params.append(start_date.isoformat())
+
+    if end_date is not None:
+        conditions.append("event_date <= %s")
+        params.append(end_date.isoformat())
+
+    params.append(safe_limit)
+
+    query = f"""
+        SELECT
+            id,
+            event_date,
+            event_type,
+            description,
+            performed_by,
+            notes,
+            source,
+            created_at
+        FROM maintenance_history
+        WHERE {" AND ".join(conditions)}
+        ORDER BY event_date DESC, id DESC
+        LIMIT %s;
+    """
+
+    with connect() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(query, tuple(params))
+            rows = cursor.fetchall()
+
+    return [dict(row) for row in rows]
