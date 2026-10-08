@@ -50,6 +50,49 @@ class SolarQueriesSolisTests(unittest.TestCase):
         self.assertGreater(result["equivalent_full_power_hours"], 0)
         self.assertGreater(result["solar_radiation_wh_m2"], 0)
 
+
+    def test_summarizes_curve_preferring_time_str(self):
+        station = {
+            "capacity": 8,
+            "capacityStr": "kW",
+            "powerStr": "kW",
+        }
+        rows = [
+            {
+                "time": 1791321600000,
+                "timeStr": "10:00:00",
+                "power": 1000,
+                "powerStr": "kW",
+                "totalR": 0,
+            },
+            {
+                "time": 1791321900000,
+                "timeStr": "10:05:00",
+                "power": 4000,
+                "powerStr": "kW",
+                "totalR": 0,
+            },
+            {
+                "time": 1791322200000,
+                "timeStr": "10:10:00",
+                "power": 6000,
+                "powerStr": "kW",
+                "totalR": 0,
+            },
+        ]
+
+        result = _summarize_power_curve(
+            rows,
+            station,
+            date(2026, 10, 7),
+            7,
+            17,
+        )
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["samples"], 3)
+        self.assertEqual(result["generation_start"], "10:00")
+
     @patch("solar_queries._live_station")
     @patch("solar_queries._solis_generation_history")
     @patch("solar_queries.fetch_daily_generation_range")

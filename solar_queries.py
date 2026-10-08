@@ -1101,7 +1101,7 @@ def _summarize_power_curve(
     for row in rows:
         try:
             timestamp = _parse_power_timestamp(
-                row.get("time"),
+                row.get("timeStr") or row.get("time"),
                 parsed_date,
             )
         except (TypeError, ValueError):
@@ -1622,7 +1622,7 @@ def _curve_points_for_analysis(
     for row in rows:
         try:
             timestamp = _parse_power_timestamp(
-                row.get("time"),
+                row.get("timeStr") or row.get("time"),
                 parsed_date,
             )
         except (TypeError, ValueError):
