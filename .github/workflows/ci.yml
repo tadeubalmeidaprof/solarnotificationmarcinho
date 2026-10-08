@@ -21,7 +21,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version-file: ".python-version"
           cache: pip
 
       - name: Install dependencies
@@ -35,8 +35,16 @@ jobs:
       - name: Import smoke test
         run: |
           python - <<'PY'
+          import ai.assistant
+          import ai.memory
+          import ai.provider
+          import ai.prompt
+          import ai.tools
           import bot
+          import config
           import database
+          import maintenance
+          import maintenance_report
           import save_monthly_snapshot
           import savings_calculator
           import send_monthly_report
@@ -44,6 +52,8 @@ jobs:
           import solis_alarm_monitor
           import solisclient
           import solisdaily
+          import utils
+          import weather
           import webhook
           import whatsapp
           PY

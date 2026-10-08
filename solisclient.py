@@ -121,6 +121,71 @@ class SolisClient:
             },
         )
 
+
+    def station_detail(self, station_id: str | None = None) -> dict[str, Any]:
+        target = str(station_id or self.credentials.station_id or "").strip()
+        if not target:
+            raise SolisAPIError("SOLIS_STATION_ID não informado.")
+        payload = {"id": int(target) if target.isdigit() else target}
+        return self.post("/v1/api/stationDetail", payload)
+
+    def station_day(
+        self,
+        report_date: str,
+        station_id: str | None = None,
+        time_zone: int = -3,
+        money: str = "BRL",
+    ) -> dict[str, Any]:
+        target = str(station_id or self.credentials.station_id or "").strip()
+        if not target:
+            raise SolisAPIError("SOLIS_STATION_ID não informado.")
+        return self.post(
+            "/v1/api/stationDay",
+            {
+                "id": int(target) if target.isdigit() else target,
+                "money": money,
+                "time": report_date,
+                "timeZone": int(time_zone),
+            },
+        )
+
+    def station_month(
+        self,
+        year_month: str,
+        station_id: str | None = None,
+        time_zone: int = -3,
+        money: str = "BRL",
+    ) -> dict[str, Any]:
+        target = str(station_id or self.credentials.station_id or "").strip()
+        if not target:
+            raise SolisAPIError("SOLIS_STATION_ID não informado.")
+        return self.post(
+            "/v1/api/stationMonth",
+            {
+                "id": int(target) if target.isdigit() else target,
+                "money": money,
+                "month": year_month,
+                "timeZone": int(time_zone),
+            },
+        )
+
+    def station_day_energy_list(
+        self,
+        report_date: str,
+        station_id: str | None = None,
+        begin_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        target = str(station_id or self.credentials.station_id or "").strip()
+        payload: dict[str, Any] = {"time": report_date}
+        if target:
+            payload["stationIds"] = target
+        if begin_date:
+            payload["beginTime"] = begin_date
+        if end_date:
+            payload["endTime"] = end_date
+        return self.post("/v1/api/stationDayEnergyList", payload)
+
     def list_alarms(
         self,
         station_id: str | None = None,

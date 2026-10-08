@@ -1,0 +1,152 @@
+import json
+import unittest
+from unittest.mock import patch
+
+from ai.assistant import ask_solcare_ai
+from ai.provider import AIProviderError, AIRateLimitError
+
+
+AI_ENV = {
+    "AI_ENABLED": "true",
+    "AI_PROVIDER": "groq",
+    "GROQ_API_KEY": "gsk_test",
+}
+
+
+class AIAssistantTests(unittest.TestCase):
+    @patch("ai.assistant.create_chat_completion")
+    def test_disabled_ai_does_not_call_provider(self, completion):
+        with patch.dict("os.environ", {"AI_ENABLED": "false"}, clear=True):
+            self.assertIsNone(ask_solcare_ai("Como está minha usina?"))
+
+        completion.assert_not_called()
+
+    @patch("ai.assistant.create_chat_completion")
+    def test_returns_direct_answer(self, completion):
+        completion.return_value = {
+            "role": "assistant",
+            "content": "Posso ajudar com o monitoramento solar.",
+        }
+
+        with patch.dict("os.environ", AI_ENV, clear=True):
+            reply = ask_solcare_ai("O que você faz?")
+
+        self.assertEqual(reply, "Posso ajudar com o monitoramento solar.")
+
+    @patch("ai.assistant.execute_tool")
+    @patch("ai.assistant.create_chat_completion")
+    def test_executes_tool_and_returns_final_answer(self, completion, execute_tool):
+        completion.side_effect = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "consultar_resumo_usina",
+                            "arguments": "{}",
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": "🟢 Sua usina está funcionando normalmente.",
+            },
+        ]
+        execute_tool.return_value = {
+            "status": "Normal",
+            "power_now_kw": 3.8,
+        }
+
+        with patch.dict("os.environ", AI_ENV, clear=True):
+            reply = ask_solcare_ai("Minha usina está funcionando?")
+
+        self.assertEqual(reply, "🟢 Sua usina está funcionando normalmente.")
+        execute_tool.assert_called_once_with("consultar_resumo_usina", {})
+        second_messages = completion.call_args_list[1].kwargs["messages"]
+        tool_message = second_messages[-1]
+        self.assertEqual(tool_message["role"], "tool")
+        tool_payload = json.loads(tool_message["content"])
+        self.assertTrue(tool_payload["ok"])
+        self.assertEqual(tool_payload["data"]["status"], "Normal")
+
+    @patch("ai.assistant.execute_tool")
+    @patch("ai.assistant.create_chat_completion")
+    def test_invalid_tool_arguments_do_not_execute_tool(self, completion, execute_tool):
+        completion.side_effect = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "consultar_resumo_usina",
+                            "arguments": "not-json",
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": "Não consegui consultar esse dado agora.",
+            },
+        ]
+
+        with patch.dict("os.environ", AI_ENV, clear=True):
+            reply = ask_solcare_ai("Minha usina está funcionando?")
+
+        self.assertEqual(reply, "Não consegui consultar esse dado agora.")
+        execute_tool.assert_not_called()
+
+    @patch("ai.assistant.create_chat_completion")
+    def test_provider_error_returns_none_for_bot_fallback(self, completion):
+        completion.side_effect = AIProviderError("indisponível")
+
+        with patch.dict("os.environ", AI_ENV, clear=True):
+            self.assertIsNone(ask_solcare_ai("Como está minha usina?"))
+
+    @patch("ai.assistant.create_chat_completion")
+    def test_rate_limit_returns_none_for_bot_fallback(self, completion):
+        completion.side_effect = AIRateLimitError("limite")
+
+        with patch.dict("os.environ", AI_ENV, clear=True):
+            self.assertIsNone(ask_solcare_ai("Como está minha usina?"))
+
+
+    @patch("ai.assistant.save_conversation_exchange")
+    @patch("ai.assistant.load_recent_messages")
+    @patch("ai.assistant.create_chat_completion")
+    def test_chat_context_is_loaded_and_saved(
+        self,
+        completion,
+        load_history,
+        save_exchange,
+    ):
+        load_history.return_value = [
+            {"role": "user", "content": "Quanto gerei hoje?"},
+            {"role": "assistant", "content": "20 kWh."},
+        ]
+        completion.return_value = {
+            "role": "assistant",
+            "content": "Ontem foram 18 kWh.",
+        }
+
+        with patch.dict("os.environ", AI_ENV, clear=True):
+            reply = ask_solcare_ai("E ontem?", chat_id="5511@c.us")
+
+        self.assertEqual(reply, "Ontem foram 18 kWh.")
+        load_history.assert_called_once_with("5511@c.us")
+        save_exchange.assert_called_once_with(
+            chat_id="5511@c.us",
+            user_message="E ontem?",
+            assistant_message="Ontem foram 18 kWh.",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

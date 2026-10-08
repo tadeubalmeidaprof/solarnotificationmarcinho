@@ -140,7 +140,7 @@ def process_message(chat_id: str, body: str) -> None:
             _send_menu(chat_id)
             return
 
-        reply = build_reply(body)
+        reply = build_reply(body, chat_id=chat_id)
         send_message(reply, chat_id=chat_id)
         logger.info("Resposta do bot enviada com sucesso.")
     except WhatsAppDeliveryError:
