@@ -27,4 +27,13 @@ CREATE TABLE IF NOT EXISTS maintenance_history (
 CREATE INDEX IF NOT EXISTS idx_maintenance_history_station_date
     ON maintenance_history (provider, station_id, event_date DESC, id DESC);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_maintenance_history_deduplicate
+    ON maintenance_history (
+        provider,
+        station_id,
+        event_date,
+        event_type,
+        md5(description)
+    );
+
 ALTER TABLE maintenance_history ENABLE ROW LEVEL SECURITY;
