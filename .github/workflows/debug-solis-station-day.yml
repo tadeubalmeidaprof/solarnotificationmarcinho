@@ -76,7 +76,8 @@ jobs:
                       if isinstance(first, dict):
                           safe_values = {}
                           for key in (
-                              "time", "power", "powerStr", "totalR",
+                              "time", "timeStr", "timeZone",
+                              "power", "powerStr", "totalR",
                               "date", "energy", "pac", "value"
                           ):
                               if key in first:
@@ -94,8 +95,25 @@ jobs:
                           )
               return out
 
+          data = response.get("data") if isinstance(response, dict) else None
+          samples = []
+          if isinstance(data, list) and data:
+              for index in (0, len(data) // 2, len(data) - 1):
+                  row = data[index]
+                  if isinstance(row, dict):
+                      samples.append({
+                          "index": index,
+                          "time": row.get("time"),
+                          "timeStr": row.get("timeStr"),
+                          "timeZone": row.get("timeZone"),
+                          "power": row.get("power"),
+                          "powerStr": row.get("powerStr"),
+                          "totalR": row.get("totalR"),
+                      })
+
           print(json.dumps({
               "target": target,
               "shape": summarize(response),
+              "samples": samples,
           }, ensure_ascii=False, indent=2, default=str))
           PY
