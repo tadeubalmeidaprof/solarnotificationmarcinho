@@ -14,7 +14,6 @@ from bot import (
 )
 from whatsapp import (
     WhatsAppDeliveryError,
-    check_whapi_connection,
     send_interactive_message,
     send_message,
 )
@@ -153,37 +152,6 @@ def process_message(chat_id: str, body: str) -> None:
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200
-
-
-@app.get("/health/whapi")
-def whapi_health():
-    try:
-        result = check_whapi_connection()
-    except WhatsAppDeliveryError as exc:
-        logger.warning("Falha no diagnóstico da Whapi: %s", exc)
-        return jsonify(
-            {
-                "status": "error",
-                "api_reachable": False,
-                "message_sent": False,
-            }
-        ), 503
-
-    ok = bool(
-        result.get("api_reachable")
-        and result.get("authenticated")
-        and result.get("channel_ok")
-    )
-
-    if result.get("chat_configured"):
-        ok = ok and result.get("chat_exists") is not False
-
-    return jsonify(
-        {
-            "status": "ok" if ok else "degraded",
-            **result,
-        }
-    ), 200 if ok else 503
 
 
 @app.post("/webhook/whapi")
