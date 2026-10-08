@@ -2,15 +2,18 @@ from solar_queries import (
     compare_months,
     get_active_faults_summary,
     get_comprehensive_analysis,
+    get_curve_anomaly_analysis,
     get_fault_code_info,
     get_generation_period,
     get_maintenance_status,
     get_performance_diagnostic,
     get_plant_status,
     get_recent_generation,
+    get_real_maintenance_history,
     get_savings_summary,
     get_solar_generation_hours,
     get_weather_window_summary,
+    record_maintenance_event,
 )
 
 
@@ -209,6 +212,122 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "analisar_curva_geracao",
+            "description": (
+                "Analisa o formato da curva de potência do dia e procura padrões "
+                "como interrupções no meio do dia, quedas bruscas, patamares "
+                "anormais, início tardio, fim precoce e pico suprimido. "
+                "Usa histórico e clima para reduzir falsos positivos."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "report_date": {
+                        "type": "string",
+                        "description": "Data no formato YYYY-MM-DD.",
+                    },
+                    "start_hour": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 23,
+                        "description": "Hora inicial. Padrão: 7.",
+                    },
+                    "end_hour": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 24,
+                        "description": "Hora final exclusiva. Padrão: 17.",
+                    },
+                },
+                "required": ["report_date"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_historico_manutencao",
+            "description": (
+                "Consulta manutenções reais já realizadas e registradas pelo "
+                "usuário, como limpeza, inspeção, reparo ou troca de componente."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 30,
+                        "description": "Quantidade máxima de eventos. Padrão: 10.",
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "description": "Data inicial opcional no formato YYYY-MM-DD.",
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "Data final opcional no formato YYYY-MM-DD.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "registrar_manutencao_real",
+            "description": (
+                "Registra uma manutenção que o usuário afirmou que realmente "
+                "foi realizada. Não use para manutenção planejada, hipótese, "
+                "recomendação ou algo ainda não confirmado."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event_date": {
+                        "type": "string",
+                        "description": "Data da manutenção no formato YYYY-MM-DD.",
+                    },
+                    "event_type": {
+                        "type": "string",
+                        "enum": [
+                            "cleaning",
+                            "inspection",
+                            "preventive",
+                            "corrective",
+                            "repair",
+                            "replacement",
+                            "electrical",
+                            "inverter",
+                            "panel",
+                            "other"
+                        ],
+                        "description": "Categoria da manutenção realizada.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Descrição objetiva do que foi realizado.",
+                    },
+                    "performed_by": {
+                        "type": "string",
+                        "description": "Quem realizou, se informado.",
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Observações adicionais, se houver.",
+                    },
+                },
+                "required": ["event_date", "event_type", "description"],
+                "additionalProperties": False,
+            },
+        },
+    },
     _no_arguments_tool(
         "analisar_usina",
         (
@@ -251,6 +370,21 @@ _TOOL_HANDLERS = {
         "get_performance_diagnostic",
         {"report_date"},
         {"report_date", "start_hour", "end_hour"},
+    ),
+    "analisar_curva_geracao": (
+        "get_curve_anomaly_analysis",
+        {"report_date"},
+        {"report_date", "start_hour", "end_hour"},
+    ),
+    "consultar_historico_manutencao": (
+        "get_real_maintenance_history",
+        set(),
+        {"limit", "start_date", "end_date"},
+    ),
+    "registrar_manutencao_real": (
+        "record_maintenance_event",
+        {"event_date", "event_type", "description"},
+        {"event_date", "event_type", "description", "performed_by", "notes"},
     ),
     "explicar_codigo_falha": ("get_fault_code_info", {"code"}, {"code"}),
     "analisar_usina": ("get_comprehensive_analysis", set(), set()),
