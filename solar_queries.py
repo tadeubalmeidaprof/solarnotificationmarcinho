@@ -5,12 +5,15 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from config import env, required_env
+from curve_analysis import analyze_power_curve
 from database import (
     fetch_active_solis_alarm_events,
     fetch_daily_generation_range,
     fetch_daily_weather_for_date,
     fetch_generation_for_month,
+    fetch_maintenance_history,
     fetch_open_maintenance_alert,
+    save_maintenance_history_event,
     fetch_solis_alarm_by_code,
 )
 from maintenance import analyze_operational_performance
@@ -1589,4 +1592,254 @@ def get_comprehensive_analysis() -> dict:
             get_savings_summary,
             current_month,
         ),
+    }
+
+
+def _curve_points_for_analysis(
+    rows: list[dict],
+    station: dict,
+    parsed_date: date,
+    start_hour: int,
+    end_hour: int,
+) -> list[dict]:
+    peak_kwp = _capacity_kwp(station)
+    scale = _power_scale_to_w(
+        rows,
+        peak_kwp,
+        str(station.get("powerStr") or ""),
+    )
+
+    points = []
+    for row in rows:
+        try:
+            timestamp = _parse_power_timestamp(
+                row.get("time"),
+                parsed_date,
+            )
+        except (TypeError, ValueError):
+            continue
+
+        if timestamp.date() != parsed_date:
+            continue
+        if not start_hour <= timestamp.hour < end_hour:
+            continue
+
+        raw_power = _number_or_none(row.get("power"))
+        if raw_power is None:
+            continue
+
+        points.append(
+            {
+                "timestamp": timestamp,
+                "power_w": max(raw_power * scale, 0.0),
+            }
+        )
+
+    points.sort(key=lambda item: item["timestamp"])
+    return points
+
+
+def get_curve_anomaly_analysis(
+    report_date: str,
+    start_hour: int = 7,
+    end_hour: int = 17,
+) -> dict:
+    parsed_date = _parse_date(
+        report_date,
+        "Data da análise da curva",
+    )
+    now = datetime.now(REPORT_TIMEZONE)
+
+    if parsed_date > now.date():
+        raise ValueError(
+            "Não é possível analisar um dia futuro."
+        )
+
+    start_hour = int(start_hour)
+    end_hour = int(end_hour)
+    if not 0 <= start_hour <= 23:
+        raise ValueError("Horário inicial inválido.")
+    if not 1 <= end_hour <= 24:
+        raise ValueError("Horário final inválido.")
+    if end_hour <= start_hour:
+        raise ValueError(
+            "O horário final deve ser posterior ao inicial."
+        )
+
+    rows, station = _station_day_rows(parsed_date)
+    peak_power_kwp = _capacity_kwp(station)
+    points = _curve_points_for_analysis(
+        rows,
+        station,
+        parsed_date,
+        start_hour,
+        end_hour,
+    )
+
+    historical_profiles = []
+    for offset in range(1, 9):
+        historical_date = parsed_date - timedelta(days=offset)
+        try:
+            historical_rows, historical_station = _station_day_rows(
+                historical_date
+            )
+            historical_points = _curve_points_for_analysis(
+                historical_rows,
+                historical_station,
+                historical_date,
+                start_hour,
+                end_hour,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Falha ao obter curva Solis histórica para análise em %s: %s",
+                historical_date.isoformat(),
+                exc,
+            )
+            continue
+
+        if historical_points:
+            historical_profiles.append(historical_points)
+        if len(historical_profiles) >= 5:
+            break
+
+    try:
+        weather = get_weather_window_summary(
+            report_date=parsed_date.isoformat(),
+            start_hour=start_hour,
+            end_hour=end_hour,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Falha ao consultar clima para análise da curva: %s",
+            exc,
+        )
+        weather = {}
+
+    complete_day = parsed_date < now.date()
+    if parsed_date == now.date():
+        settle_hour = min(end_hour, 23)
+        settle_time = datetime.combine(
+            now.date(),
+            dt_time(settle_hour, 20),
+            tzinfo=REPORT_TIMEZONE,
+        )
+        if end_hour == 24:
+            settle_time = datetime.combine(
+                now.date(),
+                dt_time(23, 59),
+                tzinfo=REPORT_TIMEZONE,
+            )
+        complete_day = now >= settle_time
+
+    analysis = analyze_power_curve(
+        points=points,
+        peak_power_kwp=peak_power_kwp,
+        historical_profiles=historical_profiles,
+        weather=weather if weather.get("available") else {},
+        complete_day=complete_day,
+    )
+
+    return {
+        "date": parsed_date.isoformat(),
+        "window_label": f"{start_hour:02d}:00-{end_hour:02d}:00",
+        "source": "solis_station_day",
+        "analysis": analysis,
+        "interpretation_limits": [
+            (
+                "Padrões na curva são indícios operacionais, não diagnóstico "
+                "definitivo de defeito."
+            ),
+            (
+                "Nuvens, chuva, sombreamento transitório e telemetria podem "
+                "produzir quedas ou oscilações semelhantes."
+            ),
+            (
+                "Conclusão de manutenção deve combinar curva, clima, alarmes, "
+                "persistência e histórico."
+            ),
+        ],
+    }
+
+
+def record_maintenance_event(
+    event_date: str,
+    event_type: str,
+    description: str,
+    performed_by: str = "",
+    notes: str = "",
+) -> dict:
+    parsed_date = _parse_date(event_date, "Data da manutenção")
+    if parsed_date > datetime.now(REPORT_TIMEZONE).date():
+        raise ValueError(
+            "O histórico real só aceita manutenções já realizadas."
+        )
+
+    event = save_maintenance_history_event(
+        provider=PROVIDER,
+        station_id=_station_id(),
+        event_date=parsed_date,
+        event_type=event_type,
+        description=description,
+        performed_by=performed_by,
+        notes=notes,
+        source="whatsapp",
+    )
+
+    return {
+        "saved": True,
+        "event": {
+            "event_date": _iso_or_text(event.get("event_date")),
+            "event_type": str(event.get("event_type") or ""),
+            "description": str(event.get("description") or ""),
+            "performed_by": str(event.get("performed_by") or ""),
+            "notes": str(event.get("notes") or ""),
+        },
+    }
+
+
+def get_real_maintenance_history(
+    limit: int = 10,
+    start_date: str = "",
+    end_date: str = "",
+) -> dict:
+    safe_limit = max(1, min(int(limit), 30))
+    parsed_start = (
+        _parse_date(start_date, "Data inicial")
+        if str(start_date or "").strip()
+        else None
+    )
+    parsed_end = (
+        _parse_date(end_date, "Data final")
+        if str(end_date or "").strip()
+        else None
+    )
+
+    if parsed_start and parsed_end and parsed_end < parsed_start:
+        raise ValueError(
+            "A data final deve ser igual ou posterior à inicial."
+        )
+
+    rows = fetch_maintenance_history(
+        provider=PROVIDER,
+        station_id=_station_id(),
+        limit=safe_limit,
+        start_date=parsed_start,
+        end_date=parsed_end,
+    )
+
+    events = [
+        {
+            "event_date": _iso_or_text(row.get("event_date")),
+            "event_type": str(row.get("event_type") or ""),
+            "description": str(row.get("description") or ""),
+            "performed_by": str(row.get("performed_by") or ""),
+            "notes": str(row.get("notes") or ""),
+        }
+        for row in rows
+    ]
+
+    return {
+        "count": len(events),
+        "events": events,
     }
