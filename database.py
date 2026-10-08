@@ -1149,8 +1149,12 @@ def save_maintenance_history_event(
 
     performed_by = str(performed_by or "").strip()
     notes = str(notes or "").strip()
+    provider = str(provider)
+    station_id = str(station_id)
+    event_date_iso = event_date.isoformat()
+    source = str(source or "whatsapp")
 
-    query = """
+    insert_query = """
         INSERT INTO maintenance_history (
             provider,
             station_id,
@@ -1162,6 +1166,7 @@ def save_maintenance_history_event(
             source
         )
         VALUES (%s, %s, %s, %s, %s, NULLIF(%s, ''), NULLIF(%s, ''), %s)
+        ON CONFLICT DO NOTHING
         RETURNING
             id,
             event_date,
@@ -1173,24 +1178,63 @@ def save_maintenance_history_event(
             created_at;
     """
 
+    select_query = """
+        SELECT
+            id,
+            event_date,
+            event_type,
+            description,
+            performed_by,
+            notes,
+            source,
+            created_at
+        FROM maintenance_history
+        WHERE provider = %s
+          AND station_id = %s
+          AND event_date = %s
+          AND event_type = %s
+          AND description = %s
+        ORDER BY id DESC
+        LIMIT 1;
+    """
+
+    params = (
+        provider,
+        station_id,
+        event_date_iso,
+        normalized_type,
+        description,
+        performed_by,
+        notes,
+        source,
+    )
+
     with connect() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute(
-                query,
-                (
-                    str(provider),
-                    str(station_id),
-                    event_date.isoformat(),
-                    normalized_type,
-                    description,
-                    performed_by,
-                    notes,
-                    str(source or "whatsapp"),
-                ),
-            )
+            cursor.execute(insert_query, params)
             row = cursor.fetchone()
 
-    return dict(row)
+            if row:
+                return dict(row)
+
+            cursor.execute(
+                select_query,
+                (
+                    provider,
+                    station_id,
+                    event_date_iso,
+                    normalized_type,
+                    description,
+                ),
+            )
+            existing = cursor.fetchone()
+
+    if not existing:
+        raise RuntimeError(
+            "Não foi possível registrar nem recuperar a manutenção."
+        )
+
+    return dict(existing)
 
 
 def fetch_maintenance_history(
