@@ -43,6 +43,7 @@ jobs:
           import bot
           import config
           import database
+          import curve_analysis
           import maintenance
           import maintenance_report
           import save_monthly_snapshot
