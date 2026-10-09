@@ -169,6 +169,28 @@ class AIToolsTests(unittest.TestCase):
             days_after=7,
         )
 
+
+    @patch("ai.tools.get_slow_degradation_analysis")
+    def test_slow_degradation_tool(self, degradation):
+        degradation.return_value = {
+            "available": True,
+            "status": "stable",
+            "degradation_likelihood_percent": 8.0,
+        }
+
+        result = execute_tool(
+            "consultar_degradacao_lenta",
+            {"window_days": 180},
+        )
+
+        self.assertEqual(
+            result["status"],
+            "stable",
+        )
+        degradation.assert_called_once_with(
+            window_days=180,
+        )
+
     def test_rejects_unknown_tool(self):
         with self.assertRaises(AIToolError):
             execute_tool("apagar_banco", {})

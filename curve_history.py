@@ -3,7 +3,10 @@ import argparse
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from solar_queries import collect_curve_analysis_for_date
+from solar_queries import (
+    collect_curve_analysis_for_date,
+    get_slow_degradation_analysis,
+)
 
 
 REPORT_TIMEZONE = ZoneInfo("America/Bahia")
@@ -93,6 +96,38 @@ def main() -> None:
                     result.get("storage", {}).get("persisted")
                 ),
             },
+        )
+
+
+    try:
+        degradation = get_slow_degradation_analysis(
+            window_days=180,
+            persist=True,
+        )
+        print(
+            "Degradação lenta processada:",
+            {
+                "available": bool(
+                    degradation.get("available")
+                ),
+                "status": degradation.get("status"),
+                "likelihood_percent": degradation.get(
+                    "degradation_likelihood_percent"
+                ),
+                "confidence": degradation.get("confidence"),
+                "observations": degradation.get("observations"),
+                "persisted": degradation.get(
+                    "storage",
+                    {},
+                ).get("persisted"),
+            },
+        )
+    except Exception as exc:
+        failures.append(
+            {
+                "date": "slow_degradation",
+                "error": type(exc).__name__,
+            }
         )
 
     if failures:
