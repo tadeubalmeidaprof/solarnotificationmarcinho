@@ -196,9 +196,150 @@ def _format_curve_tool_result(result: dict) -> str | None:
     return opening
 
 
+def _format_slow_degradation_tool_result(
+    result: dict,
+) -> str | None:
+    if not isinstance(result, dict):
+        return None
+
+    if not result.get("ok"):
+        return (
+            "Não consegui analisar a tendência de degradação agora. "
+            "Tente novamente em alguns minutos."
+        )
+
+    payload = result.get("data")
+    if not isinstance(payload, dict):
+        return None
+
+    if not payload.get("available"):
+        status = str(payload.get("status") or "")
+        if status == "warming_up":
+            observations = payload.get("observations")
+            minimum = payload.get("minimum_observations")
+            span = payload.get("date_span_days")
+
+            pieces = [
+                "⏳ Ainda não há histórico suficiente para concluir "
+                "se existe degradação lenta."
+            ]
+            if isinstance(observations, int):
+                pieces.append(
+                    f"Tenho {observations} dia(s) utilizável(is) no histórico"
+                )
+            if isinstance(span, int) and span > 0:
+                pieces.append(
+                    f"amplitude atual de {span} dias"
+                )
+            if isinstance(minimum, int):
+                pieces.append(
+                    f"mínimo estatístico: {minimum} observações"
+                )
+
+            return pieces[0] + (
+                "\n\n" + " • ".join(pieces[1:]) + "."
+                if len(pieces) > 1
+                else ""
+            )
+
+        reason = str(
+            payload.get("reason")
+            or "dados insuficientes"
+        )
+        return (
+            "Não consegui concluir a análise de degradação lenta: "
+            f"{reason}"
+        )
+
+    status = str(payload.get("status") or "inconclusive")
+    openings = {
+        "stable": (
+            "✅ Não encontrei uma tendência consistente de perda "
+            "progressiva no histórico disponível."
+        ),
+        "watch": (
+            "🟡 Existem sinais leves de perda progressiva, "
+            "mas ainda não são fortes o bastante para concluir degradação."
+        ),
+        "possible_progressive_loss": (
+            "🟠 Há indícios de perda operacional progressiva "
+            "que merecem acompanhamento."
+        ),
+        "probable_progressive_loss": (
+            "⚠️ Há sinais estatísticos consistentes de perda "
+            "operacional progressiva."
+        ),
+    }
+    opening = openings.get(
+        status,
+        "Não foi possível classificar a tendência com segurança.",
+    )
+
+    details = []
+    likelihood = payload.get("degradation_likelihood_percent")
+    if isinstance(likelihood, (int, float)):
+        details.append(
+            f"evidência estatística: {likelihood:.1f}%"
+        )
+
+    loss = payload.get("estimated_recent_loss_percent")
+    if isinstance(loss, (int, float)):
+        details.append(
+            f"perda recente estimada: {loss:.2f}%"
+        )
+
+    confidence = payload.get("confidence")
+    if confidence:
+        details.append(
+            f"confiança {_confidence_label(str(confidence))}"
+        )
+
+    observations = payload.get("observations")
+    span = payload.get("date_span_days")
+    if (
+        isinstance(observations, int)
+        and isinstance(span, int)
+    ):
+        details.append(
+            f"{observations} observações em {span} dias"
+        )
+
+    dominant = payload.get("dominant_factor")
+    if isinstance(dominant, dict):
+        label = str(dominant.get("label") or "").strip()
+        relative = dominant.get("relative_likelihood_percent")
+        if label:
+            if isinstance(relative, (int, float)):
+                details.append(
+                    f"fator mais compatível: {label} ({relative:.1f}% relativo)"
+                )
+            else:
+                details.append(
+                    f"fator mais compatível: {label}"
+                )
+
+    response = opening
+    if details:
+        response += "\n\n" + " • ".join(details) + "."
+
+    if (
+        payload.get("physical_ageing_assessment")
+        == "insufficient_span_for_physical_ageing_claim"
+    ):
+        response += (
+            "\n\nIsso indica perda operacional, se houver, "
+            "e não confirma degradação física dos módulos."
+        )
+
+    return response
+
+
 def _tool_fallback(tool_name: str, result: dict) -> str | None:
     if tool_name == "analisar_curva_geracao":
         return _format_curve_tool_result(result)
+
+    if tool_name == "consultar_degradacao_lenta":
+        return _format_slow_degradation_tool_result(result)
 
     if isinstance(result, dict) and not result.get("ok"):
         return str(
@@ -257,6 +398,59 @@ def _try_local_curve_intent(
     return reply
 
 
+def _try_local_degradation_intent(
+    user_message: str,
+    chat_id: str,
+) -> str | None:
+    normalized = _normalize_intent_text(user_message)
+
+    direct_terms = {
+        "degradacao",
+        "degradando",
+    }
+    phrases = (
+        "perdendo rendimento",
+        "perda de rendimento",
+        "rendimento caindo",
+        "queda de rendimento",
+        "perdendo eficiencia",
+        "perda de eficiencia",
+        "menos eficiente",
+        "perda gradual",
+        "queda gradual",
+        "piora gradual",
+        "piorando com o tempo",
+        "perdendo desempenho",
+        "perda de desempenho",
+    )
+
+    if (
+        not any(term in normalized for term in direct_terms)
+        and not any(phrase in normalized for phrase in phrases)
+    ):
+        return None
+
+    logger.info(
+        "Atalho local para análise de degradação lenta."
+    )
+    result = _safe_tool_result(
+        "consultar_degradacao_lenta",
+        {},
+    )
+    reply = _format_slow_degradation_tool_result(
+        result
+    )
+
+    if reply:
+        save_conversation_exchange(
+            chat_id=chat_id,
+            user_message=user_message,
+            assistant_message=reply,
+        )
+
+    return reply
+
+
 def ask_solcare_ai(message: str, chat_id: str = "") -> str | None:
     if not _enabled():
         return None
@@ -271,6 +465,13 @@ def ask_solcare_ai(message: str, chat_id: str = "") -> str | None:
 
     if len(user_message) > MAX_INPUT_CHARS:
         user_message = user_message[:MAX_INPUT_CHARS]
+
+    local_degradation_reply = _try_local_degradation_intent(
+        user_message,
+        chat_id,
+    )
+    if local_degradation_reply:
+        return local_degradation_reply
 
     local_reply = _try_local_curve_intent(
         user_message,
