@@ -24,7 +24,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: curva-historica-solis
+  group: solis-curve-api
   cancel-in-progress: false
 
 jobs:
