@@ -8,6 +8,7 @@ from typing import Any, Iterable
 
 ALGORITHM_VERSION = "slow-degradation-v1.0"
 MINIMUM_OBSERVATIONS = 35
+MINIMUM_DATE_SPAN_DAYS = 45
 RECOMMENDED_OBSERVATIONS = 90
 PHYSICAL_AGEING_MIN_SPAN_DAYS = 300
 EPSILON = 1e-9
@@ -930,7 +931,7 @@ def analyze_slow_degradation(
     if (
         observation_count
         < MINIMUM_OBSERVATIONS
-        or span_days < 45
+        or span_days < MINIMUM_DATE_SPAN_DAYS
     ):
         return {
             "available": False,
@@ -948,6 +949,9 @@ def analyze_slow_degradation(
             "date_span_days": span_days,
             "minimum_observations": (
                 MINIMUM_OBSERVATIONS
+            ),
+            "minimum_history_days": (
+                MINIMUM_DATE_SPAN_DAYS
             ),
             "recommended_observations": (
                 RECOMMENDED_OBSERVATIONS
