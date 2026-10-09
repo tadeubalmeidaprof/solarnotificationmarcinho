@@ -5,6 +5,7 @@ import unicodedata
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from ai.intent_router import detect_local_intent
 from ai.memory import load_recent_messages, save_conversation_exchange
 from ai.prompt import SYSTEM_PROMPT
 from ai.provider import AIProviderError, AIRateLimitError, create_chat_completion
@@ -357,12 +358,405 @@ def _format_slow_degradation_tool_result(
     return response
 
 
+
+def _pt_number(value, digits: int = 1) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return ""
+    return f"{number:.{digits}f}".replace(".", ",")
+
+
+def _short_date_label(value) -> str:
+    raw = str(value or "")
+    try:
+        return datetime.fromisoformat(raw).date().strftime("%d/%m")
+    except ValueError:
+        return raw or "data consultada"
+
+
+def _format_performance_tool_result(result: dict) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    if not result.get("ok"):
+        return str(
+            result.get("error")
+            or "Não consegui analisar o desempenho agora."
+        )
+
+    payload = result.get("data")
+    if not isinstance(payload, dict):
+        return None
+
+    date_label = _short_date_label(payload.get("date"))
+
+    if not payload.get("available"):
+        status = str(payload.get("status") or "")
+        if status == "inconclusive_window_in_progress":
+            return (
+                f"⏳ Ainda é cedo para fechar o desempenho de {date_label}. "
+                "A janela solar analisada ainda não terminou."
+            )
+        reason = str(
+            payload.get("reason")
+            or "dados insuficientes para uma conclusão segura"
+        )
+        return (
+            f"Não consegui concluir o desempenho de {date_label}: {reason}"
+        )
+
+    diagnostic = payload.get("diagnostic")
+    if not isinstance(diagnostic, dict):
+        return None
+
+    status = str(diagnostic.get("status") or "inconclusive")
+    openings = {
+        "normal": (
+            f"✅ O desempenho da sua usina em {date_label} "
+            "ficou próximo do padrão histórico."
+        ),
+        "weather_likely_explains_reduction": (
+            f"🌦️ O desempenho em {date_label} ficou abaixo do padrão, "
+            "mas o clima provavelmente explica boa parte da redução."
+        ),
+        "technical_fault_present": (
+            f"⚠️ O desempenho em {date_label} exige atenção porque "
+            "há falha técnica ativa registrada."
+        ),
+        "maintenance_suspected": (
+            f"🛠️ O desempenho em {date_label} ficou abaixo do padrão "
+            "e há sinais que justificam inspeção/manutenção."
+        ),
+        "attention": (
+            f"🟠 O desempenho em {date_label} ficou abaixo do padrão "
+            "e merece acompanhamento."
+        ),
+        "inconclusive_low_generation_window": (
+            f"⏳ Não há dados suficientes em {date_label} para avaliar "
+            "o desempenho com confiança."
+        ),
+        "inconclusive": (
+            f"⏳ Ainda não há histórico suficiente para avaliar "
+            f"o desempenho de {date_label} com segurança."
+        ),
+    }
+    opening = openings.get(
+        status,
+        f"Analisei o desempenho de {date_label}.",
+    )
+
+    details = []
+    daily = payload.get("daily_generation_kwh")
+    if isinstance(daily, (int, float)):
+        details.append(
+            f"geração do dia: *{_pt_number(daily, 2)} kWh*"
+        )
+
+    drop = diagnostic.get("drop_percent_vs_baseline")
+    if isinstance(drop, (int, float)):
+        details.append(
+            f"diferença para o histórico: *-{_pt_number(drop, 1)}%*"
+            if drop > 0
+            else "sem queda relevante frente ao histórico"
+        )
+
+    baseline_days = diagnostic.get("baseline_days_used")
+    if isinstance(baseline_days, int) and baseline_days > 0:
+        details.append(
+            f"referência de {baseline_days} dia(s)"
+        )
+
+    confidence = diagnostic.get("confidence")
+    if confidence:
+        details.append(
+            f"confiança {_confidence_label(str(confidence))}"
+        )
+
+    response = opening
+    if details:
+        response += "\n\n" + " • ".join(details) + "."
+
+    explanations = diagnostic.get("explanations")
+    if isinstance(explanations, list) and explanations:
+        first = str(explanations[-1] or "").strip()
+        if first:
+            response += "\n\n" + first
+
+    return response
+
+
+def _format_status_tool_result(result: dict) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    if not result.get("ok"):
+        return str(
+            result.get("error")
+            or "Não consegui consultar a situação da usina agora."
+        )
+    payload = result.get("data")
+    if not isinstance(payload, dict):
+        return None
+
+    status = str(payload.get("status") or "Sem informação")
+    details = []
+    power = payload.get("power_now_kw")
+    today = payload.get("energy_today_kwh")
+    month = payload.get("energy_month_kwh")
+
+    if isinstance(power, (int, float)):
+        details.append(f"potência agora: *{_pt_number(power, 2)} kW*")
+    if isinstance(today, (int, float)):
+        details.append(f"hoje: *{_pt_number(today, 2)} kWh*")
+    if isinstance(month, (int, float)):
+        details.append(f"mês: *{_pt_number(month, 2)} kWh*")
+
+    response = f"☀️ Status da usina: *{status}*."
+    if details:
+        response += "\n\n" + " • ".join(details) + "."
+    return response
+
+
+def _format_faults_tool_result(result: dict) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    if not result.get("ok"):
+        return str(
+            result.get("error")
+            or "Não consegui consultar as falhas agora."
+        )
+    payload = result.get("data")
+    if not isinstance(payload, dict):
+        return None
+
+    count = int(payload.get("active_fault_count") or 0)
+    faults = payload.get("faults") or []
+    if count <= 0:
+        return "✅ Não encontrei falhas ativas na usina neste momento."
+
+    lines = [
+        f"⚠️ Encontrei *{count} falha(s) ativa(s)*."
+    ]
+    for fault in faults[:3]:
+        if not isinstance(fault, dict):
+            continue
+        code = str(fault.get("code") or "").strip()
+        message = str(fault.get("message") or "Falha registrada").strip()
+        label = f"{code}: {message}" if code else message
+        lines.append(f"• {label}")
+    return "\n".join(lines)
+
+
+def _format_maintenance_tool_result(result: dict) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    if not result.get("ok"):
+        return str(
+            result.get("error")
+            or "Não consegui consultar a manutenção agora."
+        )
+    payload = result.get("data")
+    if not isinstance(payload, dict):
+        return None
+
+    alerts = payload.get("alerts") or []
+    if not payload.get("has_open_alert"):
+        return (
+            "✅ Não há alerta preventivo de manutenção aberto "
+            "para a usina neste momento."
+        )
+
+    lines = ["🛠️ Há alerta(s) de manutenção que merecem atenção:"]
+    for alert in alerts[:3]:
+        if not isinstance(alert, dict):
+            continue
+        cause = str(alert.get("probable_cause") or "").strip()
+        severity = str(alert.get("severity") or "").strip()
+        drop = alert.get("drop_percentage")
+        parts = []
+        if severity:
+            parts.append(severity)
+        if isinstance(drop, (int, float)):
+            parts.append(f"queda {_pt_number(drop, 1)}%")
+        if cause:
+            parts.append(cause)
+        if parts:
+            lines.append("• " + " — ".join(parts))
+    return "\n".join(lines)
+
+
+def _format_generation_tool_result(result: dict) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    if not result.get("ok"):
+        return str(
+            result.get("error")
+            or "Não consegui consultar a geração agora."
+        )
+    payload = result.get("data")
+    if not isinstance(payload, dict):
+        return None
+
+    total = payload.get("total_generation_kwh")
+    days = int(payload.get("days_with_data") or 0)
+    if days <= 0 or not isinstance(total, (int, float)):
+        return "Ainda não encontrei dados de geração para esse período."
+
+    start = _short_date_label(payload.get("start_date"))
+    end = _short_date_label(payload.get("end_date"))
+    if start == end:
+        response = (
+            f"☀️ Em {start}, sua usina gerou "
+            f"*{_pt_number(total, 2)} kWh*."
+        )
+    else:
+        response = (
+            f"📊 De {start} a {end}, sua usina gerou "
+            f"*{_pt_number(total, 2)} kWh*."
+        )
+
+    missing = int(payload.get("missing_days") or 0)
+    if missing > 0:
+        response += (
+            f"\n\nHá {missing} dia(s) sem dado no histórico consultado."
+        )
+    return response
+
+
+def _format_weather_tool_result(result: dict) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    if not result.get("ok"):
+        return str(
+            result.get("error")
+            or "Não consegui consultar o clima agora."
+        )
+    payload = result.get("data")
+    if not isinstance(payload, dict):
+        return None
+    if not payload.get("available"):
+        return "Não há dados climáticos suficientes para esse período."
+
+    details = []
+    cloud = payload.get("average_cloud_cover_percent")
+    rain = payload.get("total_precipitation_mm")
+    temp = payload.get("average_temperature_c")
+
+    if isinstance(cloud, (int, float)):
+        details.append(f"nuvens: {_pt_number(cloud, 0)}%")
+    if isinstance(rain, (int, float)):
+        details.append(f"chuva: {_pt_number(rain, 1)} mm")
+    if isinstance(temp, (int, float)):
+        details.append(f"temperatura média: {_pt_number(temp, 1)} °C")
+
+    date_label = _short_date_label(payload.get("date"))
+    response = f"🌦️ Clima da usina em {date_label}"
+    if details:
+        response += ":\n" + " • ".join(details) + "."
+    else:
+        response += "."
+    return response
+
+
+def _format_savings_tool_result(result: dict) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    if not result.get("ok"):
+        return str(
+            result.get("error")
+            or "Não consegui calcular a economia agora."
+        )
+    payload = result.get("data")
+    if not isinstance(payload, dict):
+        return None
+    if not payload.get("available"):
+        return (
+            "Ainda não tenho os dados necessários para calcular "
+            "a economia desse mês."
+        )
+
+    savings = payload.get("estimated_savings_brl")
+    generation = payload.get("generation_kwh")
+    if not isinstance(savings, (int, float)):
+        return None
+
+    response = (
+        f"💰 Economia estimada no mês: *R$ {_pt_number(savings, 2)}*."
+    )
+    if isinstance(generation, (int, float)):
+        response += (
+            f"\n\nGeração considerada: {_pt_number(generation, 2)} kWh."
+        )
+    return response
+
+
+def _format_standard_tool_result(
+    tool_name: str,
+    result: dict,
+) -> str | None:
+    formatters = {
+        "diagnosticar_desempenho_diario": _format_performance_tool_result,
+        "consultar_resumo_usina": _format_status_tool_result,
+        "consultar_falhas_ativas": _format_faults_tool_result,
+        "consultar_manutencao": _format_maintenance_tool_result,
+        "consultar_geracao_periodo": _format_generation_tool_result,
+        "consultar_clima": _format_weather_tool_result,
+        "consultar_economia_mes": _format_savings_tool_result,
+    }
+    formatter = formatters.get(tool_name)
+    return formatter(result) if formatter else None
+
+
+def _try_local_common_intent(
+    user_message: str,
+    chat_id: str,
+) -> str | None:
+    intent = detect_local_intent(
+        user_message,
+        today=datetime.now(RUNTIME_TIMEZONE).date(),
+    )
+    if not intent:
+        return None
+
+    tool_name = str(intent.get("tool") or "")
+    arguments = intent.get("arguments")
+    if not tool_name or not isinstance(arguments, dict):
+        return None
+
+    logger.info(
+        "Roteamento local de intenção: %s",
+        intent.get("intent"),
+    )
+    result = _safe_tool_result(
+        tool_name,
+        arguments,
+    )
+    reply = _format_standard_tool_result(
+        tool_name,
+        result,
+    )
+
+    if reply:
+        save_conversation_exchange(
+            chat_id=chat_id,
+            user_message=user_message,
+            assistant_message=reply,
+        )
+
+    return reply
+
 def _tool_fallback(tool_name: str, result: dict) -> str | None:
     if tool_name == "analisar_curva_geracao":
         return _format_curve_tool_result(result)
 
     if tool_name == "consultar_degradacao_lenta":
         return _format_slow_degradation_tool_result(result)
+
+    standard = _format_standard_tool_result(
+        tool_name,
+        result,
+    )
+    if standard:
+        return standard
 
     if isinstance(result, dict) and not result.get("ok"):
         return str(
@@ -502,6 +896,13 @@ def ask_solcare_ai(message: str, chat_id: str = "") -> str | None:
     )
     if local_reply:
         return local_reply
+
+    local_common_reply = _try_local_common_intent(
+        user_message,
+        chat_id,
+    )
+    if local_common_reply:
+        return local_common_reply
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
