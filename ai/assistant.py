@@ -218,29 +218,52 @@ def _format_slow_degradation_tool_result(
             observations = payload.get("observations")
             minimum = payload.get("minimum_observations")
             span = payload.get("date_span_days")
-
-            pieces = [
-                "⏳ Ainda não há histórico suficiente para concluir "
-                "se existe degradação lenta."
-            ]
-            if isinstance(observations, int):
-                pieces.append(
-                    f"Tenho {observations} dia(s) utilizável(is) no histórico"
-                )
-            if isinstance(span, int) and span > 0:
-                pieces.append(
-                    f"amplitude atual de {span} dias"
-                )
-            if isinstance(minimum, int):
-                pieces.append(
-                    f"mínimo estatístico: {minimum} observações"
-                )
-
-            return pieces[0] + (
-                "\n\n" + " • ".join(pieces[1:]) + "."
-                if len(pieces) > 1
-                else ""
+            minimum_history_days = payload.get(
+                "minimum_history_days",
+                45,
             )
+            recommended = payload.get(
+                "recommended_observations"
+            )
+
+            lines = [
+                "⏳ *Ainda estou aprendendo o comportamento da sua usina.*"
+            ]
+
+            if isinstance(observations, int):
+                if isinstance(span, int) and span > 0:
+                    lines.append(
+                        f"Tenho *{observations} observações válidas*, "
+                        f"cobrindo *{span} dias de histórico*."
+                    )
+                else:
+                    lines.append(
+                        f"Tenho *{observations} observações válidas* "
+                        "até agora."
+                    )
+
+            if (
+                isinstance(minimum, int)
+                and isinstance(minimum_history_days, int)
+            ):
+                lines.append(
+                    "Para analisar degradação lenta com segurança, "
+                    f"preciso de pelo menos *{minimum} observações válidas* "
+                    f"e *{minimum_history_days} dias de histórico*."
+                )
+
+            lines.append(
+                "Só entram nessa contagem os dias que passam pelos "
+                "critérios mínimos de qualidade e consistência dos dados."
+            )
+
+            if isinstance(recommended, int):
+                lines.append(
+                    f"Com *{recommended} ou mais observações*, "
+                    "a análise tende a ficar mais robusta."
+                )
+
+            return "\n\n".join(lines)
 
         reason = str(
             payload.get("reason")
