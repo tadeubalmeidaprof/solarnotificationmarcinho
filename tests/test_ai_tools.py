@@ -91,6 +91,27 @@ class AIToolsTests(unittest.TestCase):
         self.assertTrue(result["available"])
 
 
+
+    @patch("ai.tools.get_weather_generation_impact")
+    def test_weather_impact_tool(self, weather_impact):
+        weather_impact.return_value = {
+            "status": "weather_likely_affected",
+            "confidence": "moderate",
+        }
+
+        result = execute_tool(
+            "analisar_impacto_clima",
+            {"report_date": "2026-10-08"},
+        )
+
+        self.assertEqual(
+            result["status"],
+            "weather_likely_affected",
+        )
+        weather_impact.assert_called_once_with(
+            report_date="2026-10-08",
+        )
+
     @patch("ai.tools.get_curve_anomaly_analysis")
     def test_curve_analysis_tool(self, curve):
         curve.return_value = {

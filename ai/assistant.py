@@ -622,6 +622,111 @@ def _format_generation_tool_result(result: dict) -> str | None:
     return response
 
 
+
+def _format_weather_impact_tool_result(
+    result: dict,
+) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    if not result.get("ok"):
+        return str(
+            result.get("error")
+            or "Não consegui analisar o impacto do clima agora."
+        )
+
+    payload = result.get("data")
+    if not isinstance(payload, dict):
+        return None
+
+    status = str(payload.get("status") or "inconclusive")
+    date_label = _short_date_label(payload.get("date"))
+
+    openings = {
+        "weather_likely_affected": (
+            f"🌦️ Sim. O clima de {date_label} provavelmente contribuiu "
+            "para reduzir a geração."
+        ),
+        "weather_may_have_affected": (
+            f"🌥️ O clima de {date_label} pode ter contribuído para a "
+            "redução da geração, mas a evidência ainda não é conclusiva."
+        ),
+        "weather_unlikely_to_explain": (
+            f"☀️ O clima de {date_label} não parece explicar sozinho a "
+            "queda de geração observada."
+        ),
+        "no_clear_weather_impact": (
+            f"✅ Não encontrei sinal claro de impacto climático relevante "
+            f"na geração de {date_label}."
+        ),
+        "weather_context_only": (
+            f"🌦️ Tenho os dados climáticos de {date_label}, mas ainda não "
+            "há histórico de geração suficiente para estimar o impacto com segurança."
+        ),
+        "weather_data_unavailable": (
+            f"Não consegui obter dados climáticos suficientes para {date_label}."
+        ),
+        "inconclusive": (
+            f"🌦️ O clima pode ter influenciado a geração de {date_label}, "
+            "mas os dados atuais não permitem concluir com segurança."
+        ),
+    }
+    response = openings.get(
+        status,
+        "Não foi possível classificar o impacto climático com segurança.",
+    )
+
+    details = []
+    generation = payload.get("generation_kwh")
+    baseline = payload.get("recent_baseline_generation_kwh")
+    drop = payload.get("generation_drop_percent")
+    confidence = payload.get("confidence")
+    weather = payload.get("weather") or {}
+
+    if isinstance(generation, (int, float)):
+        details.append(
+            f"geração: *{_pt_number(generation, 2)} kWh*"
+        )
+    if isinstance(baseline, (int, float)):
+        details.append(
+            f"mediana recente: *{_pt_number(baseline, 2)} kWh*"
+        )
+    if isinstance(drop, (int, float)):
+        details.append(
+            f"diferença: *-{_pt_number(drop, 1)}%*"
+            if drop > 0
+            else "sem queda relevante frente ao histórico"
+        )
+
+    cloud = weather.get("average_cloud_cover_percent")
+    rain = weather.get("total_precipitation_mm")
+    sunshine = weather.get("sunshine_hours")
+
+    if isinstance(cloud, (int, float)):
+        details.append(
+            f"nebulosidade média: {_pt_number(cloud, 0)}%"
+        )
+    if isinstance(rain, (int, float)) and rain > 0:
+        details.append(
+            f"chuva: {_pt_number(rain, 1)} mm"
+        )
+    if isinstance(sunshine, (int, float)):
+        details.append(
+            f"sol na janela: {_pt_number(sunshine, 1)} h"
+        )
+    if confidence:
+        details.append(
+            f"confiança {_confidence_label(str(confidence))}"
+        )
+
+    if details:
+        response += "\n\n" + " • ".join(details) + "."
+
+    response += (
+        "\n\nEssa análise indica compatibilidade entre clima e geração; "
+        "não prova causalidade sozinha."
+    )
+    return response
+
 def _format_weather_tool_result(result: dict) -> str | None:
     if not isinstance(result, dict):
         return None
@@ -700,6 +805,7 @@ def _format_standard_tool_result(
         "consultar_manutencao": _format_maintenance_tool_result,
         "consultar_geracao_periodo": _format_generation_tool_result,
         "consultar_clima": _format_weather_tool_result,
+        "analisar_impacto_clima": _format_weather_impact_tool_result,
         "consultar_economia_mes": _format_savings_tool_result,
     }
     formatter = formatters.get(tool_name)

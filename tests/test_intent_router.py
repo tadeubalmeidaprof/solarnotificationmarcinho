@@ -20,7 +20,6 @@ class LocalIntentRouterTests(unittest.TestCase):
             "Minha usina rendeu bem hoje?",
             "Ela está gerando abaixo do normal?",
             "A produção de hoje foi ruim?",
-            "O clima prejudicou a geração hoje?",
         ]
 
         for sample in samples:
@@ -120,6 +119,23 @@ class LocalIntentRouterTests(unittest.TestCase):
                 "start_date": "2026-10-01",
                 "end_date": "2026-10-08",
             },
+        )
+
+    def test_weather_impact_question_uses_resilient_tool(self):
+        result = self.route(
+            "O clima de hoje afetou minha geração?"
+        )
+        self.assertEqual(
+            result["intent"],
+            "weather_impact",
+        )
+        self.assertEqual(
+            result["tool"],
+            "analisar_impacto_clima",
+        )
+        self.assertEqual(
+            result["arguments"]["report_date"],
+            "2026-10-08",
         )
 
     def test_weather_yesterday(self):

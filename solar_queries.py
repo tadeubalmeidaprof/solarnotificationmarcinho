@@ -1268,6 +1268,240 @@ def _summarize_power_curve(
     }
 
 
+
+def get_weather_generation_impact(
+    report_date: str,
+    start_hour: int = 7,
+    end_hour: int = 17,
+) -> dict:
+    """
+    Estima se o clima provavelmente contribuiu para a geração do dia.
+
+    Esta análise é deliberadamente independente da curva ao vivo do inversor,
+    para continuar útil quando o endpoint de potência do fabricante estiver
+    temporariamente indisponível. Ela cruza clima horário, geração observada e
+    a mediana recente da própria usina. O resultado indica compatibilidade
+    estatística, não causalidade física comprovada.
+    """
+    parsed_date = _parse_date(
+        report_date,
+        "Data da análise climática",
+    )
+    today = datetime.now(REPORT_TIMEZONE).date()
+    if parsed_date > today:
+        raise ValueError(
+            "Não é possível analisar impacto climático em um dia futuro."
+        )
+
+    weather = get_weather_window_summary(
+        report_date=parsed_date.isoformat(),
+        start_hour=start_hour,
+        end_hour=end_hour,
+    )
+
+    generation = get_generation_period(
+        start_date=parsed_date.isoformat(),
+        end_date=parsed_date.isoformat(),
+    )
+    current_generation = None
+    if generation.get("days_with_data"):
+        current_generation = _number_or_none(
+            generation.get("total_generation_kwh")
+        )
+
+    history_start = parsed_date - timedelta(days=14)
+    history_end = parsed_date - timedelta(days=1)
+    history_rows = []
+    if history_end >= history_start:
+        try:
+            history_rows = fetch_daily_generation_range(
+                provider=PROVIDER,
+                station_id=_station_id(),
+                start_date=history_start,
+                end_date=history_end,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Falha ao obter histórico para impacto climático: %s",
+                exc,
+            )
+
+    historical_values = []
+    for row in history_rows:
+        value = _number_or_none(
+            row.get("generation_day_kwh")
+        )
+        if value is None or value <= 0:
+            continue
+        historical_values.append(value)
+
+    historical_values = historical_values[-10:]
+    baseline_generation = (
+        float(median(historical_values))
+        if len(historical_values) >= 3
+        else None
+    )
+
+    drop_percent = None
+    if (
+        current_generation is not None
+        and baseline_generation is not None
+        and baseline_generation > 0
+    ):
+        drop_percent = max(
+            0.0,
+            (
+                baseline_generation
+                - current_generation
+            )
+            / baseline_generation
+            * 100.0,
+        )
+
+    cloud_cover = _number_or_none(
+        weather.get("average_cloud_cover_percent")
+    )
+    rainfall = _number_or_none(
+        weather.get("total_precipitation_mm")
+    )
+    sunshine_hours = _number_or_none(
+        weather.get("sunshine_hours")
+    )
+    radiation = _number_or_none(
+        weather.get("solar_radiation_wh_m2")
+    )
+
+    if not weather.get("available"):
+        weather_context = "unknown"
+    elif (
+        (cloud_cover is not None and cloud_cover >= 75)
+        or (rainfall is not None and rainfall >= 3)
+        or (sunshine_hours is not None and sunshine_hours < 3)
+    ):
+        weather_context = "unfavorable"
+    elif (
+        (cloud_cover is not None and cloud_cover >= 55)
+        or (rainfall is not None and rainfall >= 0.5)
+        or (
+            sunshine_hours is not None
+            and sunshine_hours < 5
+        )
+    ):
+        weather_context = "mixed"
+    else:
+        weather_context = "favorable"
+
+    baseline_days = len(historical_values)
+
+    if not weather.get("available"):
+        status = "weather_data_unavailable"
+        confidence = "low"
+    elif (
+        current_generation is None
+        or baseline_generation is None
+    ):
+        status = "weather_context_only"
+        confidence = "low"
+    elif (
+        weather_context == "unfavorable"
+        and drop_percent is not None
+        and drop_percent >= 12
+    ):
+        status = "weather_likely_affected"
+        confidence = (
+            "high"
+            if (
+                baseline_days >= 7
+                and drop_percent >= 20
+                and (
+                    (cloud_cover or 0) >= 85
+                    or (rainfall or 0) >= 5
+                    or (
+                        sunshine_hours is not None
+                        and sunshine_hours < 2.5
+                    )
+                )
+            )
+            else "moderate"
+        )
+    elif (
+        weather_context == "mixed"
+        and drop_percent is not None
+        and drop_percent >= 15
+    ):
+        status = "weather_may_have_affected"
+        confidence = "moderate" if baseline_days >= 5 else "low"
+    elif (
+        weather_context == "favorable"
+        and drop_percent is not None
+        and drop_percent >= 15
+    ):
+        status = "weather_unlikely_to_explain"
+        confidence = "moderate" if baseline_days >= 5 else "low"
+    elif (
+        drop_percent is not None
+        and drop_percent < 10
+    ):
+        status = "no_clear_weather_impact"
+        confidence = "moderate" if baseline_days >= 5 else "low"
+    else:
+        status = "inconclusive"
+        confidence = "low"
+
+    return {
+        "available": bool(weather.get("available")),
+        "date": parsed_date.isoformat(),
+        "window_label": weather.get(
+            "window_label",
+            f"{start_hour:02d}:00-{end_hour:02d}:00",
+        ),
+        "status": status,
+        "confidence": confidence,
+        "weather_context": weather_context,
+        "generation_kwh": (
+            round(current_generation, 3)
+            if current_generation is not None
+            else None
+        ),
+        "recent_baseline_generation_kwh": (
+            round(baseline_generation, 3)
+            if baseline_generation is not None
+            else None
+        ),
+        "baseline_days_used": baseline_days,
+        "generation_drop_percent": (
+            round(drop_percent, 1)
+            if drop_percent is not None
+            else None
+        ),
+        "weather": {
+            "average_cloud_cover_percent": cloud_cover,
+            "total_precipitation_mm": rainfall,
+            "sunshine_hours": sunshine_hours,
+            "solar_radiation_wh_m2": radiation,
+            "average_temperature_c": _number_or_none(
+                weather.get("average_temperature_c")
+            ),
+            "conditions": weather.get("conditions") or [],
+            "source": weather.get("source"),
+        },
+        "method": "weather_plus_recent_generation_baseline",
+        "interpretation_limits": [
+            (
+                "O resultado mede compatibilidade entre clima e queda de geração; "
+                "não prova causalidade."
+            ),
+            (
+                "A referência usa a mediana recente da própria usina e pode ser "
+                "afetada por sazonalidade, manutenção ou mudanças operacionais."
+            ),
+            (
+                "Quando a curva do inversor estiver disponível, a análise de "
+                "desempenho diário fornece evidência adicional."
+            ),
+        ],
+    }
+
 def get_solar_generation_hours(
     report_date: str,
     start_hour: int = 7,
