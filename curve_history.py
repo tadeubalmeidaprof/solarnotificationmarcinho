@@ -1,3 +1,4 @@
+import time
 import argparse
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -37,26 +38,42 @@ def main() -> None:
     failures = []
 
     for report_date in _dates_to_process(args.days):
-        try:
-            result = collect_curve_analysis_for_date(
-                report_date.isoformat(),
-                start_hour=7,
-                end_hour=17,
-                persist=True,
-            )
-        except Exception as exc:
+        result = None
+        last_error = None
+
+        for attempt in range(1, 4):
+            try:
+                result = collect_curve_analysis_for_date(
+                    report_date.isoformat(),
+                    start_hour=7,
+                    end_hour=17,
+                    persist=True,
+                )
+                last_error = None
+                break
+            except Exception as exc:
+                last_error = exc
+                print(
+                    "Tentativa de curva falhou:",
+                    {
+                        "date": report_date.isoformat(),
+                        "attempt": attempt,
+                        "error": type(exc).__name__,
+                    },
+                )
+                if attempt < 3:
+                    time.sleep(2 * attempt)
+
+        if last_error is not None or result is None:
             failures.append(
                 {
                     "date": report_date.isoformat(),
-                    "error": type(exc).__name__,
+                    "error": (
+                        type(last_error).__name__
+                        if last_error is not None
+                        else "UnknownError"
+                    ),
                 }
-            )
-            print(
-                "Falha ao processar curva:",
-                {
-                    "date": report_date.isoformat(),
-                    "error": type(exc).__name__,
-                },
             )
             continue
 
