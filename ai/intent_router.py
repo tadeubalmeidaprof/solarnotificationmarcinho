@@ -156,10 +156,21 @@ def detect_local_intent(
         )
     )
 
+    if weather_impact_signal:
+        return {
+            "intent": "weather_impact",
+            "tool": "analisar_impacto_clima",
+            "arguments": {
+                "report_date": (
+                    target_date or today
+                ).isoformat(),
+            },
+            "confidence": "high",
+        }
+
     if (
         performance_signal
         or production_quality_signal
-        or weather_impact_signal
     ):
         return {
             "intent": "performance",
