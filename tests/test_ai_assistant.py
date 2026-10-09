@@ -437,7 +437,7 @@ class AIAssistantTests(unittest.TestCase):
         completion.side_effect = AIRateLimitError("limite")
 
         with patch.dict("os.environ", AI_ENV, clear=True):
-            self.assertIsNone(ask_solcare_ai("Como está minha usina?"))
+            self.assertIsNone(ask_solcare_ai("Explique de forma simples o que é energia solar."))
 
 
     @patch("ai.assistant.save_conversation_exchange")
