@@ -105,5 +105,100 @@ class CurveAnalysisTests(unittest.TestCase):
         self.assertNotIn("suppressed_peak", types)
 
 
+    def test_baseline_prioritizes_climatically_similar_days(self):
+        current = make_curve()
+        history = []
+
+        for index in range(5):
+            points = [
+                {
+                    **point,
+                    "timestamp": point["timestamp"] - timedelta(days=index + 1),
+                }
+                for point in make_curve()
+            ]
+            history.append(
+                {
+                    "date": points[0]["timestamp"].date(),
+                    "points": points,
+                    "weather": {
+                        "average_cloud_cover_percent": 20 + index,
+                        "total_precipitation_mm": 0,
+                        "average_temperature_c": 30,
+                    },
+                }
+            )
+
+        for index in range(3):
+            points = [
+                {
+                    **point,
+                    "timestamp": point["timestamp"] - timedelta(days=index + 7),
+                }
+                for point in make_curve(suppressed=True)
+            ]
+            history.append(
+                {
+                    "date": points[0]["timestamp"].date(),
+                    "points": points,
+                    "weather": {
+                        "average_cloud_cover_percent": 95,
+                        "total_precipitation_mm": 10,
+                        "average_temperature_c": 22,
+                    },
+                }
+            )
+
+        result = analyze_power_curve(
+            points=current,
+            peak_power_kwp=8,
+            historical_profiles=history,
+            weather={
+                "average_cloud_cover_percent": 20,
+                "total_precipitation_mm": 0,
+                "average_temperature_c": 30,
+            },
+        )
+
+        self.assertEqual(result["status"], "normal")
+        self.assertGreaterEqual(result["baseline_days_used"], 5)
+        self.assertTrue(
+            all(
+                item["weather_similarity"] >= 0.35
+                for item in result["selected_history"]
+            )
+        )
+
+    def test_persistence_uses_previous_anomaly_scores(self):
+        history = [
+            [
+                {
+                    **point,
+                    "timestamp": point["timestamp"] - timedelta(days=index + 1),
+                }
+                for point in make_curve()
+            ]
+            for index in range(6)
+        ]
+
+        result = analyze_power_curve(
+            points=make_curve(suppressed=True),
+            peak_power_kwp=8,
+            historical_profiles=history,
+            weather={
+                "average_cloud_cover_percent": 15,
+                "total_precipitation_mm": 0,
+            },
+            historical_analysis_scores=[65, 72, 18, 63],
+        )
+
+        self.assertTrue(result["persistence"]["persistent"])
+        self.assertGreaterEqual(
+            result["persistence"]["persistent_days"],
+            3,
+        )
+        self.assertGreaterEqual(result["anomaly_score"], 41)
+
+
 if __name__ == "__main__":
     unittest.main()

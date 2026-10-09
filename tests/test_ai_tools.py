@@ -142,6 +142,33 @@ class AIToolsTests(unittest.TestCase):
             description="Limpeza dos módulos.",
         )
 
+
+    @patch("ai.tools.get_maintenance_impact")
+    def test_maintenance_impact_tool(self, impact):
+        impact.return_value = {
+            "available": True,
+            "status": "improvement_observed",
+        }
+
+        result = execute_tool(
+            "avaliar_impacto_manutencao",
+            {
+                "event_type": "cleaning",
+                "days_before": 7,
+                "days_after": 7,
+            },
+        )
+
+        self.assertEqual(
+            result["status"],
+            "improvement_observed",
+        )
+        impact.assert_called_once_with(
+            event_type="cleaning",
+            days_before=7,
+            days_after=7,
+        )
+
     def test_rejects_unknown_tool(self):
         with self.assertRaises(AIToolError):
             execute_tool("apagar_banco", {})

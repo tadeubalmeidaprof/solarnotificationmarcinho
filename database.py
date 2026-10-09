@@ -4,7 +4,7 @@ from datetime import date
 from typing import Any
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, execute_values
 
 from utils import to_decimal
 
@@ -1281,6 +1281,433 @@ def fetch_maintenance_history(
     with connect() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute(query, tuple(params))
+            rows = cursor.fetchall()
+
+    return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Histórico de curvas e inteligência de desempenho
+# ---------------------------------------------------------------------------
+
+def _nullable_decimal(value):
+    if value is None:
+        return None
+    return to_decimal(value)
+
+
+def save_solar_curve_points(
+    provider: str,
+    station_id: str,
+    report_date: date,
+    points: list[dict[str, Any]],
+    peak_power_kwp,
+    source: str,
+) -> int:
+    peak_w = None
+    if peak_power_kwp not in (None, ""):
+        peak_w = float(peak_power_kwp) * 1000.0
+
+    rows = []
+    for point in points:
+        timestamp = point.get("timestamp")
+        power_w = point.get("power_w")
+
+        if timestamp is None or power_w is None:
+            continue
+
+        minute_of_day = int(timestamp.hour) * 60 + int(timestamp.minute)
+        normalized_power = (
+            float(power_w) / peak_w
+            if peak_w and peak_w > 0
+            else None
+        )
+
+        rows.append(
+            (
+                str(provider),
+                str(station_id),
+                report_date.isoformat(),
+                minute_of_day,
+                timestamp,
+                to_decimal(power_w),
+                _nullable_decimal(normalized_power),
+                str(source),
+                str(point.get("quality") or "observed"),
+            )
+        )
+
+    if not rows:
+        return 0
+
+    query = """
+        INSERT INTO solar_curve_points (
+            provider,
+            station_id,
+            report_date,
+            minute_of_day,
+            measured_at,
+            power_w,
+            normalized_power,
+            source,
+            quality,
+            collected_at
+        )
+        VALUES %s
+        ON CONFLICT (
+            provider,
+            station_id,
+            report_date,
+            minute_of_day
+        )
+        DO UPDATE SET
+            measured_at = EXCLUDED.measured_at,
+            power_w = EXCLUDED.power_w,
+            normalized_power = EXCLUDED.normalized_power,
+            source = EXCLUDED.source,
+            quality = EXCLUDED.quality,
+            collected_at = NOW();
+    """
+
+    with connect() as conn:
+        with conn.cursor() as cursor:
+            execute_values(cursor, query, rows)
+
+    return len(rows)
+
+
+def fetch_solar_curve_points(
+    provider: str,
+    station_id: str,
+    report_date: date,
+) -> list[dict[str, Any]]:
+    query = """
+        SELECT
+            report_date,
+            minute_of_day,
+            measured_at,
+            power_w,
+            normalized_power,
+            source,
+            quality
+        FROM solar_curve_points
+        WHERE provider = %s
+          AND station_id = %s
+          AND report_date = %s
+        ORDER BY minute_of_day ASC;
+    """
+
+    with connect() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                query,
+                (
+                    str(provider),
+                    str(station_id),
+                    report_date.isoformat(),
+                ),
+            )
+            rows = cursor.fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def fetch_solar_curve_history(
+    provider: str,
+    station_id: str,
+    before_date: date,
+    lookback_days: int = 45,
+) -> list[dict[str, Any]]:
+    safe_days = max(1, min(int(lookback_days), 366))
+
+    query = """
+        SELECT
+            cp.report_date,
+            cp.minute_of_day,
+            cp.measured_at,
+            cp.power_w,
+            cp.normalized_power,
+            cp.source,
+            w.PERCENTUALNUVENS AS cloud_cover_percent,
+            w.CHUVAMM AS rain_mm,
+            CASE
+                WHEN w.TEMPERATURAMINIMAC IS NULL
+                 AND w.TEMPERATURAMAXIMAC IS NULL
+                    THEN NULL
+                WHEN w.TEMPERATURAMINIMAC IS NULL
+                    THEN w.TEMPERATURAMAXIMAC
+                WHEN w.TEMPERATURAMAXIMAC IS NULL
+                    THEN w.TEMPERATURAMINIMAC
+                ELSE (
+                    w.TEMPERATURAMINIMAC
+                    + w.TEMPERATURAMAXIMAC
+                ) / 2.0
+            END AS average_temperature_c
+        FROM solar_curve_points cp
+        LEFT JOIN daily_weather w
+          ON w.FORNECEDOR = cp.provider
+         AND w.IDUSINA = cp.station_id
+         AND w.DATARELATORIO = cp.report_date
+        WHERE cp.provider = %s
+          AND cp.station_id = %s
+          AND cp.report_date < %s
+          AND cp.report_date >= %s::date - (%s * INTERVAL '1 day')
+        ORDER BY cp.report_date DESC, cp.minute_of_day ASC;
+    """
+
+    with connect() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                query,
+                (
+                    str(provider),
+                    str(station_id),
+                    before_date.isoformat(),
+                    before_date.isoformat(),
+                    safe_days,
+                ),
+            )
+            rows = cursor.fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def save_daily_curve_analysis(
+    provider: str,
+    station_id: str,
+    report_date: date,
+    source: str,
+    peak_power_kwp,
+    analysis: dict[str, Any],
+    weather: dict[str, Any] | None = None,
+) -> None:
+    weather = weather or {}
+    profile = analysis.get("current_profile") or {}
+    scores = analysis.get("component_scores") or {}
+    persistence = analysis.get("persistence") or {}
+
+    query = """
+        INSERT INTO daily_curve_analysis (
+            provider,
+            station_id,
+            report_date,
+            algorithm_version,
+            source,
+            peak_power_kwp,
+            samples,
+            energy_kwh,
+            normalized_energy_hours,
+            active_hours,
+            peak_fraction,
+            generation_start_minute,
+            generation_end_minute,
+            shape_score,
+            energy_score,
+            peak_score,
+            interruption_score,
+            window_score,
+            volatility_score,
+            telemetry_score,
+            anomaly_score,
+            status,
+            confidence,
+            persistence_ratio,
+            persistent_days,
+            comparable_days,
+            baseline_days_used,
+            weather_context,
+            cloud_cover_percent,
+            rain_mm,
+            avg_temperature_c,
+            details,
+            calculated_at,
+            updated_at
+        )
+        VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s,
+            %s::jsonb, NOW(), NOW()
+        )
+        ON CONFLICT (provider, station_id, report_date)
+        DO UPDATE SET
+            algorithm_version = EXCLUDED.algorithm_version,
+            source = EXCLUDED.source,
+            peak_power_kwp = EXCLUDED.peak_power_kwp,
+            samples = EXCLUDED.samples,
+            energy_kwh = EXCLUDED.energy_kwh,
+            normalized_energy_hours = EXCLUDED.normalized_energy_hours,
+            active_hours = EXCLUDED.active_hours,
+            peak_fraction = EXCLUDED.peak_fraction,
+            generation_start_minute = EXCLUDED.generation_start_minute,
+            generation_end_minute = EXCLUDED.generation_end_minute,
+            shape_score = EXCLUDED.shape_score,
+            energy_score = EXCLUDED.energy_score,
+            peak_score = EXCLUDED.peak_score,
+            interruption_score = EXCLUDED.interruption_score,
+            window_score = EXCLUDED.window_score,
+            volatility_score = EXCLUDED.volatility_score,
+            telemetry_score = EXCLUDED.telemetry_score,
+            anomaly_score = EXCLUDED.anomaly_score,
+            status = EXCLUDED.status,
+            confidence = EXCLUDED.confidence,
+            persistence_ratio = EXCLUDED.persistence_ratio,
+            persistent_days = EXCLUDED.persistent_days,
+            comparable_days = EXCLUDED.comparable_days,
+            baseline_days_used = EXCLUDED.baseline_days_used,
+            weather_context = EXCLUDED.weather_context,
+            cloud_cover_percent = EXCLUDED.cloud_cover_percent,
+            rain_mm = EXCLUDED.rain_mm,
+            avg_temperature_c = EXCLUDED.avg_temperature_c,
+            details = EXCLUDED.details,
+            calculated_at = NOW(),
+            updated_at = NOW();
+    """
+
+    with connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                query,
+                (
+                    str(provider),
+                    str(station_id),
+                    report_date.isoformat(),
+                    str(analysis.get("algorithm_version") or ""),
+                    str(source),
+                    _nullable_decimal(peak_power_kwp),
+                    int(profile.get("samples") or 0),
+                    _nullable_decimal(profile.get("energy_kwh")),
+                    _nullable_decimal(
+                        profile.get("normalized_energy_hours")
+                    ),
+                    _nullable_decimal(profile.get("active_hours")),
+                    _nullable_decimal(
+                        profile.get("peak_fraction_of_installed")
+                    ),
+                    profile.get("generation_start_minute"),
+                    profile.get("generation_end_minute"),
+                    _nullable_decimal(scores.get("shape")),
+                    _nullable_decimal(scores.get("energy")),
+                    _nullable_decimal(scores.get("peak")),
+                    _nullable_decimal(scores.get("interruption")),
+                    _nullable_decimal(scores.get("window")),
+                    _nullable_decimal(scores.get("volatility")),
+                    _nullable_decimal(scores.get("telemetry")),
+                    _nullable_decimal(analysis.get("anomaly_score")),
+                    str(analysis.get("status") or "inconclusive"),
+                    str(analysis.get("confidence") or "very_low"),
+                    _nullable_decimal(persistence.get("ratio")),
+                    int(persistence.get("persistent_days") or 0),
+                    int(persistence.get("comparable_days") or 0),
+                    int(analysis.get("baseline_days_used") or 0),
+                    str(
+                        analysis.get("weather_context")
+                        or "mixed_or_unknown"
+                    ),
+                    _nullable_decimal(
+                        weather.get("average_cloud_cover_percent")
+                    ),
+                    _nullable_decimal(
+                        weather.get("total_precipitation_mm")
+                    ),
+                    _nullable_decimal(
+                        weather.get("average_temperature_c")
+                    ),
+                    json.dumps(analysis, ensure_ascii=False, default=str),
+                ),
+            )
+
+
+def fetch_daily_curve_analysis(
+    provider: str,
+    station_id: str,
+    report_date: date,
+) -> dict[str, Any] | None:
+    query = """
+        SELECT *
+        FROM daily_curve_analysis
+        WHERE provider = %s
+          AND station_id = %s
+          AND report_date = %s
+        LIMIT 1;
+    """
+
+    with connect() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                query,
+                (
+                    str(provider),
+                    str(station_id),
+                    report_date.isoformat(),
+                ),
+            )
+            row = cursor.fetchone()
+
+    return dict(row) if row else None
+
+
+def fetch_daily_curve_analysis_history(
+    provider: str,
+    station_id: str,
+    before_date: date,
+    limit: int = 45,
+) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(int(limit), 366))
+
+    query = """
+        SELECT *
+        FROM daily_curve_analysis
+        WHERE provider = %s
+          AND station_id = %s
+          AND report_date < %s
+        ORDER BY report_date DESC
+        LIMIT %s;
+    """
+
+    with connect() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                query,
+                (
+                    str(provider),
+                    str(station_id),
+                    before_date.isoformat(),
+                    safe_limit,
+                ),
+            )
+            rows = cursor.fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def fetch_daily_curve_analysis_range(
+    provider: str,
+    station_id: str,
+    start_date: date,
+    end_date: date,
+) -> list[dict[str, Any]]:
+    query = """
+        SELECT *
+        FROM daily_curve_analysis
+        WHERE provider = %s
+          AND station_id = %s
+          AND report_date BETWEEN %s AND %s
+        ORDER BY report_date ASC;
+    """
+
+    with connect() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                query,
+                (
+                    str(provider),
+                    str(station_id),
+                    start_date.isoformat(),
+                    end_date.isoformat(),
+                ),
+            )
             rows = cursor.fetchall()
 
     return [dict(row) for row in rows]

@@ -2,11 +2,19 @@ import logging
 import os
 from datetime import date, datetime, time as dt_time, timedelta
 from decimal import Decimal
+from statistics import median
 from zoneinfo import ZoneInfo
 
 from config import env, required_env
-from curve_analysis import analyze_power_curve
+from curve_analysis import ALGORITHM_VERSION, analyze_power_curve
 from database import (
+    save_solar_curve_points,
+    save_daily_curve_analysis,
+    fetch_solar_curve_points,
+    fetch_solar_curve_history,
+    fetch_daily_curve_analysis_range,
+    fetch_daily_curve_analysis_history,
+    fetch_daily_curve_analysis,
     fetch_active_solis_alarm_events,
     fetch_daily_generation_range,
     fetch_daily_weather_for_date,
@@ -1648,10 +1656,204 @@ def _curve_points_for_analysis(
     return points
 
 
-def get_curve_anomaly_analysis(
+def _curve_weather_from_db(
+    station_id: str,
+    report_date: date,
+) -> dict:
+    row = fetch_daily_weather_for_date(
+        provider=PROVIDER,
+        station_id=station_id,
+        report_date=report_date,
+    )
+    if not row:
+        return {}
+
+    min_temp = _number_or_none(row.get("temperature_min_c"))
+    max_temp = _number_or_none(row.get("temperature_max_c"))
+    average_temp = None
+    if min_temp is not None and max_temp is not None:
+        average_temp = (min_temp + max_temp) / 2
+    elif min_temp is not None:
+        average_temp = min_temp
+    elif max_temp is not None:
+        average_temp = max_temp
+
+    return {
+        "available": True,
+        "source": "daily_weather",
+        "average_cloud_cover_percent": _number_or_none(
+            row.get("cloud_cover_percent")
+        ),
+        "total_precipitation_mm": _number_or_none(
+            row.get("rainfall_mm")
+        ),
+        "average_temperature_c": average_temp,
+    }
+
+
+def _curve_weather(
+    station_id: str,
+    report_date: date,
+    start_hour: int,
+    end_hour: int,
+) -> dict:
+    stored = _curve_weather_from_db(
+        station_id,
+        report_date,
+    )
+    if stored:
+        return stored
+
+    try:
+        return get_weather_window_summary(
+            report_date=report_date.isoformat(),
+            start_hour=start_hour,
+            end_hour=end_hour,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Falha ao consultar clima para curva em %s: %s",
+            report_date.isoformat(),
+            exc,
+        )
+        return {}
+
+
+def _stored_curve_profiles(
+    station_id: str,
+    before_date: date,
+    start_hour: int,
+    end_hour: int,
+    lookback_days: int = 45,
+) -> list[dict]:
+    rows = fetch_solar_curve_history(
+        provider=PROVIDER,
+        station_id=station_id,
+        before_date=before_date,
+        lookback_days=lookback_days,
+    )
+
+    grouped: dict[date, dict] = {}
+    for row in rows:
+        day = row.get("report_date")
+        if not isinstance(day, date):
+            try:
+                day = date.fromisoformat(str(day))
+            except (TypeError, ValueError):
+                continue
+
+        minute = int(row.get("minute_of_day") or 0)
+        hour = minute // 60
+        if not start_hour <= hour < end_hour:
+            continue
+
+        item = grouped.setdefault(
+            day,
+            {
+                "date": day,
+                "points": [],
+                "weather": {},
+            },
+        )
+
+        timestamp = datetime(
+            day.year,
+            day.month,
+            day.day,
+            minute // 60,
+            minute % 60,
+            tzinfo=REPORT_TIMEZONE,
+        )
+        item["points"].append(
+            {
+                "timestamp": timestamp,
+                "power_w": float(row.get("power_w") or 0),
+            }
+        )
+
+        if not item["weather"]:
+            item["weather"] = {
+                "average_cloud_cover_percent": _number_or_none(
+                    row.get("cloud_cover_percent")
+                ),
+                "total_precipitation_mm": _number_or_none(
+                    row.get("rain_mm")
+                ),
+                "average_temperature_c": _number_or_none(
+                    row.get("average_temperature_c")
+                ),
+            }
+
+    return [
+        grouped[key]
+        for key in sorted(grouped, reverse=True)
+    ]
+
+
+def _curve_day_complete(
+    parsed_date: date,
+    end_hour: int,
+) -> bool:
+    now = datetime.now(REPORT_TIMEZONE)
+    if parsed_date < now.date():
+        return True
+    if parsed_date > now.date():
+        return False
+
+    if end_hour == 24:
+        settle_time = datetime.combine(
+            now.date(),
+            dt_time(23, 59),
+            tzinfo=REPORT_TIMEZONE,
+        )
+    else:
+        settle_time = datetime.combine(
+            now.date(),
+            dt_time(end_hour, 20),
+            tzinfo=REPORT_TIMEZONE,
+        )
+
+    return now >= settle_time
+
+
+def _stored_curve_result(
+    row: dict,
+    start_hour: int,
+    end_hour: int,
+) -> dict:
+    details = row.get("details")
+    if not isinstance(details, dict):
+        details = {}
+
+    return {
+        "date": _iso_or_text(row.get("report_date")),
+        "window_label": f"{start_hour:02d}:00-{end_hour:02d}:00",
+        "source": str(row.get("source") or "solis_station_day"),
+        "analysis": details,
+        "storage": {
+            "persisted": True,
+            "algorithm_version": str(
+                row.get("algorithm_version") or ""
+            ),
+        },
+        "interpretation_limits": [
+            (
+                "O score compara a curva com o histórico da própria usina; "
+                "não confirma defeito isoladamente."
+            ),
+            (
+                "Clima, persistência, alarmes e manutenções reais devem ser "
+                "considerados antes de recomendar intervenção."
+            ),
+        ],
+    }
+
+
+def collect_curve_analysis_for_date(
     report_date: str,
     start_hour: int = 7,
     end_hour: int = 17,
+    persist: bool = True,
 ) -> dict:
     parsed_date = _parse_date(
         report_date,
@@ -1675,8 +1877,17 @@ def get_curve_anomaly_analysis(
             "O horário final deve ser posterior ao inicial."
         )
 
+    station_id = _station_id()
     rows, station = _station_day_rows(parsed_date)
     peak_power_kwp = _capacity_kwp(station)
+    if peak_power_kwp is None or peak_power_kwp <= 0:
+        return {
+            "available": False,
+            "date": parsed_date.isoformat(),
+            "status": "inconclusive",
+            "reason": "Capacidade instalada da usina indisponível.",
+        }
+
     points = _curve_points_for_analysis(
         rows,
         station,
@@ -1684,62 +1895,106 @@ def get_curve_anomaly_analysis(
         start_hour,
         end_hour,
     )
+    complete_day = _curve_day_complete(
+        parsed_date,
+        end_hour,
+    )
 
-    historical_profiles = []
-    for offset in range(1, 9):
-        historical_date = parsed_date - timedelta(days=offset)
-        try:
-            historical_rows, historical_station = _station_day_rows(
-                historical_date
-            )
-            historical_points = _curve_points_for_analysis(
-                historical_rows,
-                historical_station,
-                historical_date,
-                start_hour,
-                end_hour,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Falha ao obter curva Solis histórica para análise em %s: %s",
-                historical_date.isoformat(),
-                exc,
-            )
-            continue
-
-        if historical_points:
-            historical_profiles.append(historical_points)
-        if len(historical_profiles) >= 5:
-            break
-
-    try:
-        weather = get_weather_window_summary(
-            report_date=parsed_date.isoformat(),
-            start_hour=start_hour,
-            end_hour=end_hour,
+    if persist and points:
+        save_solar_curve_points(
+            provider=PROVIDER,
+            station_id=station_id,
+            report_date=parsed_date,
+            points=points,
+            peak_power_kwp=peak_power_kwp,
+            source="solis_station_day",
         )
-    except Exception as exc:
-        logger.warning(
-            "Falha ao consultar clima para análise da curva: %s",
-            exc,
-        )
-        weather = {}
 
-    complete_day = parsed_date < now.date()
-    if parsed_date == now.date():
-        settle_hour = min(end_hour, 23)
-        settle_time = datetime.combine(
-            now.date(),
-            dt_time(settle_hour, 20),
-            tzinfo=REPORT_TIMEZONE,
-        )
-        if end_hour == 24:
-            settle_time = datetime.combine(
-                now.date(),
-                dt_time(23, 59),
-                tzinfo=REPORT_TIMEZONE,
+    historical_profiles = _stored_curve_profiles(
+        station_id,
+        parsed_date,
+        start_hour,
+        end_hour,
+        lookback_days=45,
+    )
+
+    existing_dates = {
+        item["date"]
+        for item in historical_profiles
+        if item.get("date") is not None
+    }
+
+    if len(historical_profiles) < 5:
+        for offset in range(1, 15):
+            historical_date = parsed_date - timedelta(days=offset)
+            if historical_date in existing_dates:
+                continue
+
+            try:
+                historical_rows, historical_station = _station_day_rows(
+                    historical_date
+                )
+                historical_points = _curve_points_for_analysis(
+                    historical_rows,
+                    historical_station,
+                    historical_date,
+                    start_hour,
+                    end_hour,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Falha ao buscar curva Solis histórica de %s: %s",
+                    historical_date.isoformat(),
+                    exc,
+                )
+                continue
+
+            if not historical_points:
+                continue
+
+            historical_profiles.append(
+                {
+                    "date": historical_date,
+                    "points": historical_points,
+                    "weather": _curve_weather_from_db(
+                        station_id,
+                        historical_date,
+                    ),
+                }
             )
-        complete_day = now >= settle_time
+            existing_dates.add(historical_date)
+
+            if persist:
+                save_solar_curve_points(
+                    provider=PROVIDER,
+                    station_id=station_id,
+                    report_date=historical_date,
+                    points=historical_points,
+                    peak_power_kwp=peak_power_kwp,
+                    source="solis_station_day",
+                )
+
+            if len(historical_profiles) >= 8:
+                break
+
+    weather = _curve_weather(
+        station_id,
+        parsed_date,
+        start_hour,
+        end_hour,
+    )
+
+    previous_analyses = fetch_daily_curve_analysis_history(
+        provider=PROVIDER,
+        station_id=station_id,
+        before_date=parsed_date,
+        limit=5,
+    )
+    previous_scores = [
+        float(row["anomaly_score"])
+        for row in previous_analyses
+        if row.get("anomaly_score") is not None
+    ]
 
     analysis = analyze_power_curve(
         points=points,
@@ -1747,27 +2002,397 @@ def get_curve_anomaly_analysis(
         historical_profiles=historical_profiles,
         weather=weather if weather.get("available") else {},
         complete_day=complete_day,
+        historical_analysis_scores=previous_scores,
     )
+
+    if (
+        persist
+        and complete_day
+        and analysis.get("available")
+    ):
+        save_daily_curve_analysis(
+            provider=PROVIDER,
+            station_id=station_id,
+            report_date=parsed_date,
+            source="solis_station_day",
+            peak_power_kwp=peak_power_kwp,
+            analysis=analysis,
+            weather=weather,
+        )
 
     return {
         "date": parsed_date.isoformat(),
         "window_label": f"{start_hour:02d}:00-{end_hour:02d}:00",
         "source": "solis_station_day",
         "analysis": analysis,
+        "storage": {
+            "persisted": bool(
+                persist
+                and complete_day
+                and analysis.get("available")
+            ),
+            "historical_curve_days_available": len(
+                historical_profiles
+            ),
+        },
         "interpretation_limits": [
             (
-                "Padrões na curva são indícios operacionais, não diagnóstico "
-                "definitivo de defeito."
+                "O score usa baseline robusto da própria usina, mediana/MAD "
+                "por horário, recência e similaridade climática."
             ),
             (
-                "Nuvens, chuva, sombreamento transitório e telemetria podem "
-                "produzir quedas ou oscilações semelhantes."
+                "O score mede desvio operacional, não confirma defeito."
             ),
             (
-                "Conclusão de manutenção deve combinar curva, clima, alarmes, "
-                "persistência e histórico."
+                "Manutenção deve considerar persistência, clima, alarmes "
+                "e histórico real de intervenções."
             ),
         ],
+    }
+
+
+def get_curve_anomaly_analysis(
+    report_date: str,
+    start_hour: int = 7,
+    end_hour: int = 17,
+) -> dict:
+    parsed_date = _parse_date(
+        report_date,
+        "Data da análise da curva",
+    )
+    start_hour = int(start_hour)
+    end_hour = int(end_hour)
+
+    if (
+        start_hour == 7
+        and end_hour == 17
+        and parsed_date <= datetime.now(REPORT_TIMEZONE).date()
+    ):
+        station_id = _station_id()
+        stored = fetch_daily_curve_analysis(
+            provider=PROVIDER,
+            station_id=station_id,
+            report_date=parsed_date,
+        )
+        if (
+            stored
+            and str(stored.get("algorithm_version") or "")
+            == ALGORITHM_VERSION
+        ):
+            return _stored_curve_result(
+                stored,
+                start_hour,
+                end_hour,
+            )
+
+    return collect_curve_analysis_for_date(
+        parsed_date.isoformat(),
+        start_hour=start_hour,
+        end_hour=end_hour,
+        persist=(
+            start_hour == 7
+            and end_hour == 17
+        ),
+    )
+
+
+def _curve_performance_index(row: dict) -> float | None:
+    normalized_energy = _number_or_none(
+        row.get("normalized_energy_hours")
+    )
+    active_hours = _number_or_none(
+        row.get("active_hours")
+    )
+    if (
+        normalized_energy is None
+        or active_hours is None
+        or active_hours < 2.5
+    ):
+        return None
+
+    return normalized_energy / active_hours
+
+
+def _maintenance_weather_distance(
+    first: dict,
+    second: dict,
+) -> float:
+    pieces = []
+
+    first_cloud = _number_or_none(
+        first.get("cloud_cover_percent")
+    )
+    second_cloud = _number_or_none(
+        second.get("cloud_cover_percent")
+    )
+    if first_cloud is not None and second_cloud is not None:
+        pieces.append(abs(first_cloud - second_cloud) / 20.0)
+
+    first_temp = _number_or_none(
+        first.get("avg_temperature_c")
+    )
+    second_temp = _number_or_none(
+        second.get("avg_temperature_c")
+    )
+    if first_temp is not None and second_temp is not None:
+        pieces.append(abs(first_temp - second_temp) / 8.0)
+
+    first_rain = _number_or_none(first.get("rain_mm"))
+    second_rain = _number_or_none(second.get("rain_mm"))
+    if first_rain is not None and second_rain is not None:
+        first_wet = first_rain > 1
+        second_wet = second_rain > 1
+        pieces.append(0.0 if first_wet == second_wet else 1.5)
+
+    return (
+        sum(pieces) / len(pieces)
+        if pieces
+        else 1.0
+    )
+
+
+def get_maintenance_impact(
+    event_type: str = "",
+    days_before: int = 7,
+    days_after: int = 7,
+) -> dict:
+    safe_before = max(3, min(int(days_before), 30))
+    safe_after = max(3, min(int(days_after), 30))
+    station_id = _station_id()
+
+    events = fetch_maintenance_history(
+        provider=PROVIDER,
+        station_id=station_id,
+        limit=30,
+    )
+
+    normalized_type = str(event_type or "").strip().lower()
+    if normalized_type:
+        events = [
+            event
+            for event in events
+            if str(event.get("event_type") or "").lower()
+            == normalized_type
+        ]
+
+    if not events:
+        return {
+            "available": False,
+            "status": "no_maintenance_event",
+            "reason": (
+                "Não há manutenção real registrada para essa consulta."
+            ),
+        }
+
+    event = events[0]
+    event_date = event.get("event_date")
+    if not isinstance(event_date, date):
+        event_date = _parse_date(
+            str(event_date),
+            "Data da manutenção",
+        )
+
+    today = datetime.now(REPORT_TIMEZONE).date()
+    before_start = event_date - timedelta(days=safe_before)
+    before_end = event_date - timedelta(days=1)
+    after_start = event_date + timedelta(days=1)
+    after_end = min(
+        today,
+        event_date + timedelta(days=safe_after),
+    )
+
+    if after_end < after_start:
+        return {
+            "available": False,
+            "status": "waiting_post_maintenance_data",
+            "event_date": event_date.isoformat(),
+            "reason": (
+                "Ainda não há dias completos após a manutenção."
+            ),
+        }
+
+    before_rows = fetch_daily_curve_analysis_range(
+        provider=PROVIDER,
+        station_id=station_id,
+        start_date=before_start,
+        end_date=before_end,
+    )
+    after_rows = fetch_daily_curve_analysis_range(
+        provider=PROVIDER,
+        station_id=station_id,
+        start_date=after_start,
+        end_date=after_end,
+    )
+
+    before_rows = [
+        row for row in before_rows
+        if _curve_performance_index(row) is not None
+    ]
+    after_rows = [
+        row for row in after_rows
+        if _curve_performance_index(row) is not None
+    ]
+
+    pairs = []
+    used_before = set()
+    for after_row in after_rows:
+        candidates = []
+        for index, before_row in enumerate(before_rows):
+            if index in used_before:
+                continue
+            distance = _maintenance_weather_distance(
+                before_row,
+                after_row,
+            )
+            candidates.append(
+                (distance, index, before_row)
+            )
+
+        if not candidates:
+            break
+
+        distance, index, before_row = min(
+            candidates,
+            key=lambda item: item[0],
+        )
+        if distance > 1.75:
+            continue
+
+        used_before.add(index)
+        pairs.append(
+            {
+                "before": before_row,
+                "after": after_row,
+                "weather_distance": distance,
+            }
+        )
+
+    weather_matched = len(pairs) >= 3
+    if weather_matched:
+        before_selected = [
+            pair["before"] for pair in pairs
+        ]
+        after_selected = [
+            pair["after"] for pair in pairs
+        ]
+    else:
+        before_selected = before_rows
+        after_selected = after_rows
+
+    if (
+        len(before_selected) < 3
+        or len(after_selected) < 3
+    ):
+        return {
+            "available": False,
+            "status": "insufficient_curve_history",
+            "event_date": event_date.isoformat(),
+            "before_days_found": len(before_rows),
+            "after_days_found": len(after_rows),
+            "reason": (
+                "São necessários pelo menos 3 dias válidos antes "
+                "e 3 depois da manutenção."
+            ),
+        }
+
+    before_indexes = [
+        _curve_performance_index(row)
+        for row in before_selected
+    ]
+    after_indexes = [
+        _curve_performance_index(row)
+        for row in after_selected
+    ]
+    before_indexes = [
+        value for value in before_indexes
+        if value is not None
+    ]
+    after_indexes = [
+        value for value in after_indexes
+        if value is not None
+    ]
+
+    before_median = float(median(before_indexes))
+    after_median = float(median(after_indexes))
+    change_percent = (
+        (after_median - before_median)
+        / before_median
+        * 100.0
+        if before_median > 0
+        else None
+    )
+
+    before_energy = [
+        float(row["normalized_energy_hours"])
+        for row in before_selected
+        if row.get("normalized_energy_hours") is not None
+    ]
+    after_energy = [
+        float(row["normalized_energy_hours"])
+        for row in after_selected
+        if row.get("normalized_energy_hours") is not None
+    ]
+    energy_change = None
+    if before_energy and after_energy:
+        before_energy_median = float(median(before_energy))
+        after_energy_median = float(median(after_energy))
+        if before_energy_median > 0:
+            energy_change = (
+                (after_energy_median - before_energy_median)
+                / before_energy_median
+                * 100.0
+            )
+
+    if change_percent is None:
+        status = "inconclusive"
+    elif change_percent >= 8:
+        status = "improvement_observed"
+    elif change_percent <= -8:
+        status = "decline_observed"
+    else:
+        status = "no_clear_change"
+
+    confidence = (
+        "high"
+        if weather_matched and len(pairs) >= 5
+        else "moderate"
+        if weather_matched
+        else "low"
+    )
+
+    return {
+        "available": True,
+        "status": status,
+        "confidence": confidence,
+        "event": {
+            "event_date": event_date.isoformat(),
+            "event_type": str(event.get("event_type") or ""),
+            "description": str(event.get("description") or ""),
+        },
+        "comparison": {
+            "before_days_used": len(before_selected),
+            "after_days_used": len(after_selected),
+            "weather_matched_pairs": len(pairs),
+            "weather_matching_used": weather_matched,
+            "performance_index_before": round(before_median, 4),
+            "performance_index_after": round(after_median, 4),
+            "performance_change_percent": (
+                round(change_percent, 1)
+                if change_percent is not None
+                else None
+            ),
+            "normalized_energy_change_percent": (
+                round(energy_change, 1)
+                if energy_change is not None
+                else None
+            ),
+        },
+        "metric_explanation": (
+            "O índice principal é horas equivalentes divididas pelas "
+            "horas produtivas. Quando possível, dias antes e depois são "
+            "pareados por clima semelhante. O resultado mostra associação "
+            "temporal e não prova causalidade da manutenção."
+        ),
     }
 
 
