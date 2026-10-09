@@ -2107,7 +2107,7 @@ def get_curve_anomaly_analysis(
 
 def get_slow_degradation_analysis(
     window_days: int = 180,
-    persist: bool = True,
+    persist: bool = False,
 ) -> dict:
     safe_window = max(
         45,
@@ -2136,26 +2136,34 @@ def get_slow_degradation_analysis(
         requested_window_days=safe_window,
     )
 
+    persisted = False
+    storage_error = None
     if (
         persist
         and analysis.get("available")
     ):
-        save_slow_degradation_analysis(
-            provider=PROVIDER,
-            station_id=station_id,
-            analysis_date=today,
-            window_days=safe_window,
-            analysis=analysis,
-        )
+        try:
+            save_slow_degradation_analysis(
+                provider=PROVIDER,
+                station_id=station_id,
+                analysis_date=today,
+                window_days=safe_window,
+                analysis=analysis,
+            )
+            persisted = True
+        except Exception as exc:
+            storage_error = type(exc).__name__
+            logger.warning(
+                "Não foi possível persistir degradação lenta: %s",
+                storage_error,
+            )
 
     return {
         **analysis,
         "window_days": safe_window,
         "storage": {
-            "persisted": bool(
-                persist
-                and analysis.get("available")
-            ),
+            "persisted": persisted,
+            "error": storage_error,
         },
     }
 
