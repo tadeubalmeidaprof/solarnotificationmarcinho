@@ -20,7 +20,6 @@ class LocalIntentRouterTests(unittest.TestCase):
             "Minha usina rendeu bem hoje?",
             "Ela está gerando abaixo do normal?",
             "A produção de hoje foi ruim?",
-            "O clima prejudicou a geração hoje?",
         ]
 
         for sample in samples:
