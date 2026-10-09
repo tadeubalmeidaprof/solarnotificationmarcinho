@@ -186,6 +186,138 @@ class AIAssistantTests(unittest.TestCase):
         self.assertIn("1.6/100", reply)
         self.assertEqual(completion.call_count, 2)
 
+
+    @patch("ai.assistant.execute_tool")
+    @patch("ai.assistant.create_chat_completion")
+    def test_degradation_question_uses_local_tool_without_groq(
+        self,
+        completion,
+        execute_tool,
+    ):
+        execute_tool.return_value = {
+            "available": True,
+            "status": "probable_progressive_loss",
+            "degradation_likelihood_percent": 84.7,
+            "estimated_recent_loss_percent": 4.3,
+            "confidence": "high",
+            "observations": 112,
+            "date_span_days": 118,
+            "dominant_factor": {
+                "label": "sujeira/acúmulo sobre os módulos",
+                "relative_likelihood_percent": 38.0,
+            },
+            "physical_ageing_assessment": (
+                "insufficient_span_for_physical_ageing_claim"
+            ),
+        }
+
+        with patch.dict("os.environ", AI_ENV, clear=True):
+            reply = ask_solcare_ai(
+                "Minha usina tem sinais de degradação?"
+            )
+
+        self.assertIn(
+            "perda operacional progressiva",
+            reply,
+        )
+        self.assertIn("84.7%", reply)
+        self.assertIn(
+            "não confirma degradação física",
+            reply,
+        )
+        execute_tool.assert_called_once_with(
+            "consultar_degradacao_lenta",
+            {},
+        )
+        completion.assert_not_called()
+
+    @patch("ai.assistant.execute_tool")
+    @patch("ai.assistant.create_chat_completion")
+    def test_losing_yield_phrase_uses_degradation_local_tool(
+        self,
+        completion,
+        execute_tool,
+    ):
+        execute_tool.return_value = {
+            "available": False,
+            "status": "warming_up",
+            "observations": 18,
+            "date_span_days": 22,
+            "minimum_observations": 35,
+        }
+
+        with patch.dict("os.environ", AI_ENV, clear=True):
+            reply = ask_solcare_ai(
+                "Minha usina está perdendo rendimento?"
+            )
+
+        self.assertIn(
+            "histórico suficiente",
+            reply,
+        )
+        self.assertIn(
+            "35 observações",
+            reply,
+        )
+        execute_tool.assert_called_once_with(
+            "consultar_degradacao_lenta",
+            {},
+        )
+        completion.assert_not_called()
+
+    @patch("ai.assistant.execute_tool")
+    @patch("ai.assistant.create_chat_completion")
+    def test_rate_limit_after_degradation_tool_returns_tool_fallback(
+        self,
+        completion,
+        execute_tool,
+    ):
+        completion.side_effect = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_degradation",
+                        "type": "function",
+                        "function": {
+                            "name": "consultar_degradacao_lenta",
+                            "arguments": '{"window_days":180}',
+                        },
+                    }
+                ],
+            },
+            AIRateLimitError("limite"),
+        ]
+        execute_tool.return_value = {
+            "available": True,
+            "status": "possible_progressive_loss",
+            "degradation_likelihood_percent": 61.0,
+            "estimated_recent_loss_percent": 3.2,
+            "confidence": "moderate",
+            "observations": 75,
+            "date_span_days": 82,
+            "dominant_factor": {
+                "label": "sujeira/acúmulo sobre os módulos",
+                "relative_likelihood_percent": 34.0,
+            },
+            "physical_ageing_assessment": (
+                "insufficient_span_for_physical_ageing_claim"
+            ),
+        }
+
+        with patch.dict("os.environ", AI_ENV, clear=True):
+            reply = ask_solcare_ai(
+                "Avalie a tendência histórica da minha usina."
+            )
+
+        self.assertIn(
+            "indícios de perda operacional progressiva",
+            reply,
+        )
+        self.assertIn("61.0%", reply)
+        self.assertEqual(completion.call_count, 2)
+
     @patch("ai.assistant.create_chat_completion")
     def test_provider_error_returns_none_for_bot_fallback(self, completion):
         completion.side_effect = AIProviderError("indisponível")
