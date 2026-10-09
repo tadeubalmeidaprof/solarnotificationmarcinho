@@ -1,0 +1,66 @@
+name: Histórico inteligente da curva
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Dias para reprocessar (1-45)"
+        required: false
+        default: "7"
+  schedule:
+    # 22:15 UTC = 19:15 em America/Bahia.
+    - cron: "15 22 * * *"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/curva-historica.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: curva-historica-solis
+  cancel-in-progress: false
+
+jobs:
+  processar-curvas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+          cache: pip
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Persistir curvas e recalcular scores
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SOLIS_API_ID: ${{ secrets.SOLIS_API_ID }}
+          SOLIS_API_SECRET: ${{ secrets.SOLIS_API_SECRET }}
+          SOLIS_BASE_URL: ${{ secrets.SOLIS_BASE_URL }}
+          SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
+          STATION_LATITUDE: ${{ secrets.STATION_LATITUDE }}
+          STATION_LONGITUDE: ${{ secrets.STATION_LONGITUDE }}
+          WEATHERAPI_KEY: ${{ secrets.WEATHERAPI_KEY }}
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_DAYS: ${{ github.event.inputs.days }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            DAYS=14
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            DAYS="${MANUAL_DAYS:-7}"
+          else
+            DAYS=1
+          fi
+          python curve_history.py --days "$DAYS"
