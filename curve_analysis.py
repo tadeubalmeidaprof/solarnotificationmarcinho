@@ -922,6 +922,11 @@ def analyze_power_curve(
     if weather_context == "unfavorable":
         anomaly_score *= 0.85
 
+    # Uma interrupção longa no miolo do dia merece no mínimo atenção,
+    # mesmo quando a média ponderada dos demais componentes é baixa.
+    if interruption_score >= 70:
+        anomaly_score = max(anomaly_score, 45.0)
+
     prior_scores = [
         float(score)
         for score in (historical_analysis_scores or [])
@@ -1014,7 +1019,7 @@ def analyze_power_curve(
             }
         )
 
-    if peak_score >= 45:
+    if peak_score >= 45 and weather_context == "favorable":
         anomalies.append(
             {
                 "type": "suppressed_peak",
