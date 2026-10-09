@@ -7,14 +7,17 @@ from zoneinfo import ZoneInfo
 
 from config import env, required_env
 from curve_analysis import ALGORITHM_VERSION, analyze_power_curve
+from degradation_analysis import analyze_slow_degradation
 from database import (
     save_solar_curve_points,
     save_daily_curve_analysis,
+    save_slow_degradation_analysis,
     fetch_solar_curve_points,
     fetch_solar_curve_history,
     fetch_daily_curve_analysis_range,
     fetch_daily_curve_analysis_history,
     fetch_daily_curve_analysis,
+    fetch_latest_slow_degradation_analysis,
     fetch_active_solis_alarm_events,
     fetch_daily_generation_range,
     fetch_daily_weather_for_date,
@@ -1605,6 +1608,11 @@ def get_comprehensive_analysis() -> dict:
             get_performance_diagnostic,
             today,
         ),
+        "slow_degradation": _safe_component(
+            get_slow_degradation_analysis,
+            180,
+            False,
+        ),
         "savings_current_month": _safe_component(
             get_savings_summary,
             current_month,
@@ -2094,6 +2102,63 @@ def get_curve_anomaly_analysis(
             and end_hour == 17
         ),
     )
+
+
+
+def get_slow_degradation_analysis(
+    window_days: int = 180,
+    persist: bool = True,
+) -> dict:
+    safe_window = max(
+        45,
+        min(int(window_days), 366),
+    )
+    station_id = _station_id()
+    today = datetime.now(
+        REPORT_TIMEZONE
+    ).date()
+
+    rows = fetch_daily_curve_analysis_history(
+        provider=PROVIDER,
+        station_id=station_id,
+        before_date=today + timedelta(days=1),
+        limit=366,
+    )
+    maintenance_events = fetch_maintenance_history(
+        provider=PROVIDER,
+        station_id=station_id,
+        limit=30,
+    )
+
+    analysis = analyze_slow_degradation(
+        rows,
+        maintenance_events=maintenance_events,
+        requested_window_days=safe_window,
+    )
+
+    if (
+        persist
+        and analysis.get("available")
+    ):
+        save_slow_degradation_analysis(
+            provider=PROVIDER,
+            station_id=station_id,
+            analysis_date=today,
+            window_days=safe_window,
+            analysis=analysis,
+        )
+
+    return {
+        **analysis,
+        "window_days": safe_window,
+        "storage": {
+            "persisted": bool(
+                persist
+                and analysis.get("available")
+            ),
+        },
+    }
+
 
 
 def _curve_performance_index(row: dict) -> float | None:
