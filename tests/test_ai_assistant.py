@@ -17,7 +17,7 @@ class AIAssistantTests(unittest.TestCase):
     @patch("ai.assistant.create_chat_completion")
     def test_disabled_ai_does_not_call_provider(self, completion):
         with patch.dict("os.environ", {"AI_ENABLED": "false"}, clear=True):
-            self.assertIsNone(ask_solcare_ai("Como está minha usina?"))
+            self.assertIsNone(ask_solcare_ai("Conte uma curiosidade sobre energia solar."))
 
         completion.assert_not_called()
 
@@ -330,6 +330,99 @@ class AIAssistantTests(unittest.TestCase):
             reply,
         )
         self.assertIn("61.0%", reply)
+        self.assertEqual(completion.call_count, 2)
+
+
+    @patch("ai.assistant.execute_tool")
+    @patch("ai.assistant.create_chat_completion")
+    def test_performance_paraphrase_uses_local_router_without_groq(
+        self,
+        completion,
+        execute_tool,
+    ):
+        execute_tool.return_value = {
+            "available": True,
+            "date": "2026-10-08",
+            "daily_generation_kwh": 28.4,
+            "historical_days_found": 7,
+            "diagnostic": {
+                "status": "normal",
+                "confidence": "moderate",
+                "baseline_days_used": 5,
+                "drop_percent_vs_baseline": 3.2,
+                "explanations": [
+                    "O desempenho ficou próximo do padrão histórico da própria usina."
+                ],
+            },
+        }
+
+        with patch.dict("os.environ", AI_ENV, clear=True):
+            reply = ask_solcare_ai(
+                "Como foi o desempenho da minha usina hoje?"
+            )
+
+        self.assertIn(
+            "desempenho da sua usina",
+            reply,
+        )
+        self.assertIn(
+            "padrão histórico",
+            reply,
+        )
+        self.assertIn("28,40 kWh", reply)
+        self.assertIn("-3,2%", reply)
+        completion.assert_not_called()
+        self.assertEqual(
+            execute_tool.call_args.args[0],
+            "diagnosticar_desempenho_diario",
+        )
+
+    @patch("ai.assistant.execute_tool")
+    @patch("ai.assistant.create_chat_completion")
+    def test_rate_limit_after_performance_tool_has_local_fallback(
+        self,
+        completion,
+        execute_tool,
+    ):
+        completion.side_effect = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_perf",
+                        "type": "function",
+                        "function": {
+                            "name": "diagnosticar_desempenho_diario",
+                            "arguments": '{"report_date":"2026-10-08"}',
+                        },
+                    }
+                ],
+            },
+            AIRateLimitError("limite"),
+        ]
+        execute_tool.return_value = {
+            "available": True,
+            "date": "2026-10-08",
+            "daily_generation_kwh": 22.1,
+            "diagnostic": {
+                "status": "attention",
+                "confidence": "moderate",
+                "baseline_days_used": 6,
+                "drop_percent_vs_baseline": 19.5,
+                "explanations": [
+                    "A queda é perceptível e merece acompanhamento."
+                ],
+            },
+        }
+
+        with patch.dict("os.environ", AI_ENV, clear=True):
+            reply = ask_solcare_ai(
+                "Faça uma avaliação dos dados operacionais do dia 08/10."
+            )
+
+        self.assertIn("merece acompanhamento", reply)
+        self.assertIn("-19,5%", reply)
         self.assertEqual(completion.call_count, 2)
 
     @patch("ai.assistant.create_chat_completion")
