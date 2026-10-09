@@ -15,6 +15,10 @@ on:
       - main
     paths:
       - ".github/workflows/curva-historica.yml"
+      - "curve_history.py"
+      - "curve_analysis.py"
+      - "solar_queries.py"
+      - "database.py"
 
 permissions:
   contents: read
