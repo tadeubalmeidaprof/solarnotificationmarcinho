@@ -17,6 +17,7 @@ on:
       - ".github/workflows/curva-historica.yml"
       - "curve_history.py"
       - "curve_analysis.py"
+      - "degradation_analysis.py"
       - "solar_queries.py"
       - "database.py"
 
