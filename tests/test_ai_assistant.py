@@ -103,6 +103,89 @@ class AIAssistantTests(unittest.TestCase):
         self.assertEqual(reply, "Não consegui consultar esse dado agora.")
         execute_tool.assert_not_called()
 
+
+    @patch("ai.assistant.execute_tool")
+    @patch("ai.assistant.create_chat_completion")
+    def test_curve_today_uses_local_fallback_without_groq(
+        self,
+        completion,
+        execute_tool,
+    ):
+        execute_tool.return_value = {
+            "date": "2026-10-08",
+            "analysis": {
+                "available": True,
+                "status": "normal",
+                "anomaly_score": 5.0,
+                "confidence": "high",
+                "baseline_days_used": 20,
+                "anomalies": [],
+                "persistence": {
+                    "persistent": False,
+                },
+            },
+        }
+
+        with patch.dict("os.environ", AI_ENV, clear=True):
+            reply = ask_solcare_ai(
+                "A curva de hoje teve alguma anomalia?"
+            )
+
+        self.assertIn("dentro do padrão histórico", reply)
+        self.assertIn("5.0/100", reply)
+        execute_tool.assert_called_once()
+        completion.assert_not_called()
+
+    @patch("ai.assistant.execute_tool")
+    @patch("ai.assistant.create_chat_completion")
+    def test_rate_limit_after_curve_tool_returns_tool_fallback(
+        self,
+        completion,
+        execute_tool,
+    ):
+        completion.side_effect = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_curve",
+                        "type": "function",
+                        "function": {
+                            "name": "analisar_curva_geracao",
+                            "arguments": (
+                                '{"report_date":"2026-10-07"}'
+                            ),
+                        },
+                    }
+                ],
+            },
+            AIRateLimitError("limite"),
+        ]
+        execute_tool.return_value = {
+            "date": "2026-10-07",
+            "analysis": {
+                "available": True,
+                "status": "normal",
+                "anomaly_score": 1.6,
+                "confidence": "high",
+                "baseline_days_used": 20,
+                "anomalies": [],
+                "persistence": {
+                    "persistent": False,
+                },
+            },
+        }
+
+        with patch.dict("os.environ", AI_ENV, clear=True):
+            reply = ask_solcare_ai(
+                "Analise a curva do dia 2026-10-07."
+            )
+
+        self.assertIn("dentro do padrão histórico", reply)
+        self.assertIn("1.6/100", reply)
+        self.assertEqual(completion.call_count, 2)
+
     @patch("ai.assistant.create_chat_completion")
     def test_provider_error_returns_none_for_bot_fallback(self, completion):
         completion.side_effect = AIProviderError("indisponível")
