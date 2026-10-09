@@ -137,6 +137,18 @@ class SlowDegradationAnalysisTests(
             result["status"],
             "warming_up",
         )
+        self.assertEqual(
+            result["minimum_observations"],
+            35,
+        )
+        self.assertEqual(
+            result["minimum_history_days"],
+            45,
+        )
+        self.assertEqual(
+            result["recommended_observations"],
+            90,
+        )
 
     def test_stable_series_remains_low_risk(self):
         result = analyze_slow_degradation(
