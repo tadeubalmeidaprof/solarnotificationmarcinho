@@ -430,7 +430,7 @@ class AIAssistantTests(unittest.TestCase):
         completion.side_effect = AIProviderError("indisponível")
 
         with patch.dict("os.environ", AI_ENV, clear=True):
-            self.assertIsNone(ask_solcare_ai("Como está minha usina?"))
+            self.assertIsNone(ask_solcare_ai("Explique de forma simples o que é energia solar."))
 
     @patch("ai.assistant.create_chat_completion")
     def test_rate_limit_returns_none_for_bot_fallback(self, completion):
