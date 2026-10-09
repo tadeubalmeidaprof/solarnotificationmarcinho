@@ -1350,8 +1350,7 @@ def save_solar_curve_points(
             power_w,
             normalized_power,
             source,
-            quality,
-            collected_at
+            quality
         )
         VALUES %s
         ON CONFLICT (
