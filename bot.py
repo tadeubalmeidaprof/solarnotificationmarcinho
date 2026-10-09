@@ -6,13 +6,14 @@ from solar_queries import get_generation_summary
 
 TODAY_BUTTON_ID = "generation_today"
 MONTH_BUTTON_ID = "generation_month"
+HELP_BUTTON_ID = "help_examples"
 
 MENU_BODY = """Olá! 👋 Bem-vindo ao *SolCare*.
-Estou aqui para ajudar você a acompanhar sua usina solar de forma rápida e simples.
+Você pode usar os atalhos abaixo ou conversar comigo normalmente.
 
-Selecione uma opção:"""
+Ex.: *Como está minha usina?*"""
 
-MENU_FOOTER = "Digite menu a qualquer momento para voltar às opções."
+MENU_FOOTER = "Digite menu para voltar aqui a qualquer momento."
 
 MENU_BUTTONS = [
     {
@@ -23,14 +24,35 @@ MENU_BUTTONS = [
         "id": MONTH_BUTTON_ID,
         "title": "📊 Geração do mês",
     },
+    {
+        "id": HELP_BUTTON_ID,
+        "title": "💬 O que posso perguntar?",
+    },
 ]
 
 MENU_MESSAGE = f"""{MENU_BODY}
 
 1 - ☀️ Geração de hoje
 2 - 📊 Geração do mês
+3 - 💬 O que posso perguntar?
 
 {MENU_FOOTER}"""
+
+HELP_MESSAGE = """💬 *Você pode perguntar com suas próprias palavras.*
+
+Alguns exemplos:
+
+☀️ *Geração* — Quanto gerei hoje?
+📈 *Desempenho* — Minha usina está rendendo bem?
+📉 *Tendência* — Minha usina está perdendo rendimento?
+⚠️ *Falhas* — Tem alguma falha ativa?
+🛠️ *Manutenção* — Preciso fazer manutenção?
+🌦️ *Clima* — O clima afetou minha geração?
+💰 *Economia* — Quanto economizei este mês?
+
+Também posso analisar a curva de geração, comparar períodos e explicar códigos de falha.
+
+_Não precisa copiar as frases. Pergunte do seu jeito._"""
 
 UNKNOWN_MESSAGE = (
     "Não entendi sua mensagem.\n\n"
@@ -40,6 +62,16 @@ UNKNOWN_MESSAGE = (
 MENU_TRIGGERS = {"oi", "ola", "menu", "ajuda", "inicio"}
 TODAY_ALIASES = {"1", "geracao de hoje", "ver geracao de hoje"}
 MONTH_ALIASES = {"2", "geracao do mes", "ver geracao do mes"}
+HELP_ALIASES = {
+    "3",
+    "exemplos",
+    "perguntas",
+    "ver perguntas",
+    "o que posso perguntar",
+    "o que voce faz",
+    "como posso usar",
+    "como usar",
+}
 
 
 def normalize_text(value: str) -> str:
@@ -87,6 +119,12 @@ def build_reply(message: str, chat_id: str = "") -> str:
             f"*{summary['month_kwh']} kWh neste mês*.\n\n"
             "Digite *menu* para ver as opções novamente."
         )
+
+    if (
+        raw_value == HELP_BUTTON_ID
+        or normalized in HELP_ALIASES
+    ):
+        return HELP_MESSAGE
 
     ai_reply = ask_solcare_ai(
         message,
