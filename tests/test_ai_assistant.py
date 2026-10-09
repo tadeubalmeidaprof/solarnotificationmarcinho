@@ -244,6 +244,8 @@ class AIAssistantTests(unittest.TestCase):
             "observations": 18,
             "date_span_days": 22,
             "minimum_observations": 35,
+            "minimum_history_days": 45,
+            "recommended_observations": 90,
         }
 
         with patch.dict("os.environ", AI_ENV, clear=True):
@@ -252,11 +254,23 @@ class AIAssistantTests(unittest.TestCase):
             )
 
         self.assertIn(
-            "histórico suficiente",
+            "aprendendo o comportamento",
             reply,
         )
         self.assertIn(
-            "35 observações",
+            "35 observações válidas",
+            reply,
+        )
+        self.assertIn(
+            "45 dias de histórico",
+            reply,
+        )
+        self.assertIn(
+            "90 ou mais observações",
+            reply,
+        )
+        self.assertIn(
+            "critérios mínimos de qualidade",
             reply,
         )
         execute_tool.assert_called_once_with(
