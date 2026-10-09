@@ -1430,10 +1430,19 @@ def fetch_solar_curve_history(
             cp.source,
             w.PERCENTUALNUVENS AS cloud_cover_percent,
             w.CHUVAMM AS rain_mm,
-            (
-                COALESCE(w.TEMPERATURAMINIMAC, 0)
-                + COALESCE(w.TEMPERATURAMAXIMAC, 0)
-            ) / 2.0 AS average_temperature_c
+            CASE
+                WHEN w.TEMPERATURAMINIMAC IS NULL
+                 AND w.TEMPERATURAMAXIMAC IS NULL
+                    THEN NULL
+                WHEN w.TEMPERATURAMINIMAC IS NULL
+                    THEN w.TEMPERATURAMAXIMAC
+                WHEN w.TEMPERATURAMAXIMAC IS NULL
+                    THEN w.TEMPERATURAMINIMAC
+                ELSE (
+                    w.TEMPERATURAMINIMAC
+                    + w.TEMPERATURAMAXIMAC
+                ) / 2.0
+            END AS average_temperature_c
         FROM solar_curve_points cp
         LEFT JOIN daily_weather w
           ON w.FORNECEDOR = cp.provider
