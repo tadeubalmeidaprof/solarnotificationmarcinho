@@ -425,6 +425,48 @@ class AIAssistantTests(unittest.TestCase):
         self.assertIn("-19,5%", reply)
         self.assertEqual(completion.call_count, 2)
 
+
+    @patch("ai.assistant.execute_tool")
+    @patch("ai.assistant.create_chat_completion")
+    def test_weather_impact_question_uses_local_resilient_tool(
+        self,
+        completion,
+        execute_tool,
+    ):
+        execute_tool.return_value = {
+            "available": True,
+            "date": "2026-10-08",
+            "status": "weather_likely_affected",
+            "confidence": "moderate",
+            "generation_kwh": 18.0,
+            "recent_baseline_generation_kwh": 25.0,
+            "baseline_days_used": 8,
+            "generation_drop_percent": 28.0,
+            "weather": {
+                "average_cloud_cover_percent": 82.0,
+                "total_precipitation_mm": 4.2,
+                "sunshine_hours": 2.4,
+            },
+        }
+
+        with patch.dict("os.environ", AI_ENV, clear=True):
+            reply = ask_solcare_ai(
+                "O clima de hoje afetou minha geração?"
+            )
+
+        self.assertIn(
+            "provavelmente contribuiu",
+            reply,
+        )
+        self.assertIn("18,00 kWh", reply)
+        self.assertIn("-28,0%", reply)
+        self.assertIn("82%", reply)
+        execute_tool.assert_called_once_with(
+            "analisar_impacto_clima",
+            {"report_date": "2026-10-08"},
+        )
+        completion.assert_not_called()
+
     @patch("ai.assistant.create_chat_completion")
     def test_provider_error_returns_none_for_bot_fallback(self, completion):
         completion.side_effect = AIProviderError("indisponível")
