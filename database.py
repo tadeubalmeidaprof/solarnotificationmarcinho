@@ -1710,3 +1710,154 @@ def fetch_daily_curve_analysis_range(
             rows = cursor.fetchall()
 
     return [dict(row) for row in rows]
+
+# ---------------------------------------------------------------------------
+# Detecção de degradação lenta
+# ---------------------------------------------------------------------------
+
+def save_slow_degradation_analysis(
+    provider: str,
+    station_id: str,
+    analysis_date: date,
+    window_days: int,
+    analysis: dict[str, Any],
+) -> None:
+    dominant = analysis.get("dominant_factor") or {}
+
+    query = """
+        INSERT INTO slow_degradation_analysis (
+            provider,
+            station_id,
+            analysis_date,
+            algorithm_version,
+            window_days,
+            observations,
+            date_span_days,
+            status,
+            severity,
+            degradation_likelihood_percent,
+            confidence,
+            confidence_score_percent,
+            estimated_recent_loss_percent,
+            annualized_trend_percent,
+            dominant_factor,
+            factors,
+            metrics,
+            details,
+            calculated_at,
+            updated_at
+        )
+        VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s,
+            %s::jsonb, %s::jsonb, %s::jsonb,
+            NOW(), NOW()
+        )
+        ON CONFLICT (
+            provider,
+            station_id,
+            analysis_date
+        )
+        DO UPDATE SET
+            algorithm_version = EXCLUDED.algorithm_version,
+            window_days = EXCLUDED.window_days,
+            observations = EXCLUDED.observations,
+            date_span_days = EXCLUDED.date_span_days,
+            status = EXCLUDED.status,
+            severity = EXCLUDED.severity,
+            degradation_likelihood_percent =
+                EXCLUDED.degradation_likelihood_percent,
+            confidence = EXCLUDED.confidence,
+            confidence_score_percent =
+                EXCLUDED.confidence_score_percent,
+            estimated_recent_loss_percent =
+                EXCLUDED.estimated_recent_loss_percent,
+            annualized_trend_percent =
+                EXCLUDED.annualized_trend_percent,
+            dominant_factor = EXCLUDED.dominant_factor,
+            factors = EXCLUDED.factors,
+            metrics = EXCLUDED.metrics,
+            details = EXCLUDED.details,
+            calculated_at = NOW(),
+            updated_at = NOW();
+    """
+
+    metrics = {
+        "trend_tests": analysis.get("trend_tests") or {},
+        "persistence": analysis.get("persistence") or {},
+        "data_quality": analysis.get("data_quality") or {},
+        "physical_ageing_assessment": analysis.get(
+            "physical_ageing_assessment"
+        ),
+        "maintenance_context": analysis.get(
+            "maintenance_context"
+        ),
+    }
+
+    with connect() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                query,
+                (
+                    str(provider),
+                    str(station_id),
+                    analysis_date.isoformat(),
+                    str(analysis.get("algorithm_version") or ""),
+                    int(window_days),
+                    int(analysis.get("observations") or 0),
+                    int(analysis.get("date_span_days") or 0),
+                    str(analysis.get("status") or "inconclusive"),
+                    str(analysis.get("severity") or "low"),
+                    analysis.get("degradation_likelihood_percent"),
+                    str(analysis.get("confidence") or "low"),
+                    analysis.get("confidence_score_percent"),
+                    analysis.get("estimated_recent_loss_percent"),
+                    analysis.get("annualized_trend_percent"),
+                    str(dominant.get("factor") or ""),
+                    json.dumps(
+                        analysis.get("likely_factors") or [],
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                    json.dumps(
+                        metrics,
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                    json.dumps(
+                        analysis,
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                ),
+            )
+
+
+def fetch_latest_slow_degradation_analysis(
+    provider: str,
+    station_id: str,
+) -> dict[str, Any] | None:
+    query = """
+        SELECT *
+        FROM slow_degradation_analysis
+        WHERE provider = %s
+          AND station_id = %s
+        ORDER BY analysis_date DESC
+        LIMIT 1;
+    """
+
+    with connect() as conn:
+        with conn.cursor(
+            cursor_factory=RealDictCursor
+        ) as cursor:
+            cursor.execute(
+                query,
+                (
+                    str(provider),
+                    str(station_id),
+                ),
+            )
+            row = cursor.fetchone()
+
+    return dict(row) if row else None
+
