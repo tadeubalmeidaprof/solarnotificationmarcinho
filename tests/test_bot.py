@@ -2,6 +2,9 @@ import unittest
 from unittest.mock import patch
 
 from bot import (
+    HELP_BUTTON_ID,
+    HELP_MESSAGE,
+    MENU_BUTTONS,
     MENU_MESSAGE,
     MONTH_BUTTON_ID,
     TODAY_BUTTON_ID,
@@ -25,6 +28,38 @@ class BotTests(unittest.TestCase):
         reply = build_reply("1")
 
         self.assertIn("18,42 kWh hoje", reply)
+
+
+    def test_menu_introduces_free_form_questions(self):
+        self.assertIn(
+            "conversar comigo normalmente",
+            MENU_MESSAGE,
+        )
+        self.assertIn(
+            "Como está minha usina?",
+            MENU_MESSAGE,
+        )
+        self.assertEqual(len(MENU_BUTTONS), 3)
+
+    @patch("bot.ask_solcare_ai")
+    def test_help_button_returns_examples_without_ai(self, ask_ai):
+        reply = build_reply(HELP_BUTTON_ID)
+
+        self.assertEqual(reply, HELP_MESSAGE)
+        self.assertIn("Quanto gerei hoje?", reply)
+        self.assertIn(
+            "Minha usina está perdendo rendimento?",
+            reply,
+        )
+        self.assertIn("Tem alguma falha ativa?", reply)
+        ask_ai.assert_not_called()
+
+    @patch("bot.ask_solcare_ai")
+    def test_help_text_alias_returns_examples_without_ai(self, ask_ai):
+        reply = build_reply("O que posso perguntar?")
+
+        self.assertEqual(reply, HELP_MESSAGE)
+        ask_ai.assert_not_called()
 
     @patch("bot.get_generation_summary")
     def test_today_button_returns_today_generation(self, summary):
