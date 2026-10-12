@@ -1,0 +1,68 @@
+name: Localização automática Solis
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/solis-location-smoke.yml"
+      - "solis_location.py"
+      - "solisclient.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: solis-location-api
+  cancel-in-progress: false
+
+jobs:
+  validar-localizacao:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+      - run: pip install -r requirements.txt
+      - name: Consultar localização real sem override manual
+        env:
+          SOLIS_API_ID: ${{ secrets.SOLIS_API_ID }}
+          SOLIS_API_SECRET: ${{ secrets.SOLIS_API_SECRET }}
+          SOLIS_BASE_URL: ${{ secrets.SOLIS_BASE_URL }}
+          SOLIS_STATION_ID: ${{ secrets.SOLIS_STATION_ID }}
+        run: |
+          python - <<'PY'
+          import json
+          from solisdaily import extract_station_from_list, load_environment
+          from solisclient import SolisClient, SolisCredentials
+          from solis_location import SolisLocationError, coordinates_from_station, resolve_coordinates
+
+          env = load_environment()
+          client = SolisClient(SolisCredentials(
+              api_id=env["SOLIS_API_ID"],
+              api_secret=env["SOLIS_API_SECRET"],
+              base_url=env["SOLIS_BASE_URL"],
+              station_id=env["SOLIS_STATION_ID"],
+          ))
+          station = extract_station_from_list(client.list_stations(), env["SOLIS_STATION_ID"])
+          list_available = coordinates_from_station(station) is not None
+
+          def detail_loader():
+              response = client.station_detail()
+              data = response.get("data")
+              print(json.dumps({
+                  "list_coordinates_available": list_available,
+                  "detail_coordinates_available": coordinates_from_station(data) is not None,
+              }))
+              return response
+
+          try:
+              coordinates = resolve_coordinates(station, detail_loader=detail_loader)
+          except SolisLocationError as exc:
+              raise SystemExit(str(exc)) from None
+          print(json.dumps({
+              "coordinates_available": coordinates is not None,
+              "source": "userStationList" if list_available else "stationDetail",
+          }))
+          PY

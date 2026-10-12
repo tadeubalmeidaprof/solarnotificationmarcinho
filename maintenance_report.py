@@ -16,6 +16,7 @@ from database import (
     save_daily_weather,
 )
 from maintenance import analyze_maintenance_need
+from solis_location import resolve_coordinates
 from solisdaily import (
     SolisAPIError,
     SolisClient,
@@ -55,27 +56,6 @@ def format_number(value, decimals: int = 1) -> str:
         .replace(".", ",")
         .replace("X", ".")
     )
-
-
-def _coordinates(station: dict) -> tuple[float, float]:
-    latitude_raw = os.getenv("STATION_LATITUDE", "").strip()
-    longitude_raw = os.getenv("STATION_LONGITUDE", "").strip()
-
-    if latitude_raw and longitude_raw:
-        return (
-            float(latitude_raw.replace(",", ".")),
-            float(longitude_raw.replace(",", ".")),
-        )
-
-    latitude = station.get("latitude")
-    longitude = station.get("longitude")
-    if latitude in (None, "") or longitude in (None, ""):
-        raise RuntimeError(
-            "Localização da usina não disponível. "
-            "Configure STATION_LATITUDE e STATION_LONGITUDE."
-        )
-
-    return float(latitude), float(longitude)
 
 
 def build_integrator_alert_message(
@@ -147,7 +127,10 @@ def main() -> None:
         device_sn="",
     )
 
-    latitude, longitude = _coordinates(station)
+    latitude, longitude = resolve_coordinates(
+        station,
+        detail_loader=client.station_detail,
+    )
     weather = get_daily_weather(
         latitude=latitude,
         longitude=longitude,
