@@ -1,8 +1,9 @@
 import json
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
-from ai.assistant import ask_solcare_ai
+from ai.assistant import RUNTIME_TIMEZONE, ask_solcare_ai
 from ai.provider import AIProviderError, AIRateLimitError
 
 
@@ -452,9 +453,6 @@ class AIAssistantTests(unittest.TestCase):
         with patch.dict("os.environ", AI_ENV, clear=True), patch(
             "ai.assistant.datetime",
         ) as clock:
-            from datetime import datetime
-            from ai.assistant import RUNTIME_TIMEZONE
-
             clock.now.return_value = datetime(
                 2026, 10, 8, 18, 0, tzinfo=RUNTIME_TIMEZONE,
             )
