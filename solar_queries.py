@@ -33,6 +33,7 @@ from savings_calculator import (
     calculate_savings_without_fio_b,
 )
 from solisclient import SolisAPIError, SolisClient, SolisCredentials
+from solis_location import SolisLocationError, resolve_coordinates
 from utils import br_number, to_decimal
 from weather import get_daily_weather, get_weather_window
 
@@ -196,25 +197,21 @@ def _power_to_kw(value, unit_hint: str = "") -> float | None:
 
 
 def _coordinates() -> tuple[float, float] | None:
-    lat_raw = env("STATION_LATITUDE")
-    lon_raw = env("STATION_LONGITUDE")
-
-    if lat_raw and lon_raw:
-        return (
-            float(lat_raw.replace(",", ".")),
-            float(lon_raw.replace(",", ".")),
-        )
-
     try:
-        station = _live_station()
+        if env("STATION_LATITUDE") or env("STATION_LONGITUDE"):
+            return resolve_coordinates()
+        client = _client()
+        try:
+            station = _find_station(client.list_stations(), _station_id())
+        except SolisAPIError:
+            station = None
+        return resolve_coordinates(station, detail_loader=client.station_detail)
+    except SolisLocationError:
+        logger.warning("Localização Solis indisponível para a consulta de clima.")
+        return None
     except Exception:
+        logger.exception("Falha ao consultar localização da usina Solis.")
         return None
-
-    lat = _number_or_none(station.get("latitude"))
-    lon = _number_or_none(station.get("longitude"))
-    if lat is None or lon is None:
-        return None
-    return lat, lon
 
 
 def get_generation_summary() -> dict[str, str]:
