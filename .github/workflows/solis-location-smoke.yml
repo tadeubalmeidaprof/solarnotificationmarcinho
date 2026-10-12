@@ -47,7 +47,27 @@ jobs:
           ))
           station = extract_station_from_list(client.list_stations(), env["SOLIS_STATION_ID"])
           list_available = coordinates_from_station(station) is not None
-          coordinates = resolve_coordinates(station, detail_loader=client.station_detail)
+
+          def detail_loader():
+              response = client.station_detail()
+              data = response.get("data")
+              print(json.dumps({
+                  "detail_data_type": type(data).__name__,
+                  "detail_fields": sorted(data) if isinstance(data, dict) else [],
+                  "list_location_fields": {
+                      key: {"present": key in station, "value_type": type(station.get(key)).__name__,
+                            "nonempty": station.get(key) not in (None, "")}
+                      for key in ("latitude", "longitude", "lat", "lng", "lon")
+                  },
+                  "detail_location_fields": {
+                      key: {"present": key in data, "value_type": type(data.get(key)).__name__,
+                            "nonempty": data.get(key) not in (None, "")}
+                      for key in ("latitude", "longitude", "lat", "lng", "lon")
+                  } if isinstance(data, dict) else {},
+              }))
+              return response
+
+          coordinates = resolve_coordinates(station, detail_loader=detail_loader)
           print(json.dumps({
               "coordinates_available": coordinates is not None,
               "source": "userStationList" if list_available else "stationDetail",
