@@ -54,6 +54,12 @@ jobs:
               print(json.dumps({
                   "detail_data_type": type(data).__name__,
                   "detail_fields": sorted(data) if isinstance(data, dict) else [],
+                  "list_fields": sorted(station),
+                  "detail_nested_fields": {
+                      key: sorted(value) if isinstance(value, dict) else type(value).__name__
+                      for key, value in data.items()
+                      if isinstance(value, (dict, list)) or key in ("extraInfo", "screenMap")
+                  } if isinstance(data, dict) else {},
                   "list_location_fields": {
                       key: {"present": key in station, "value_type": type(station.get(key)).__name__,
                             "nonempty": station.get(key) not in (None, "")}
